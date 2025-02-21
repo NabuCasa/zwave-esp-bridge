@@ -1,0 +1,26 @@
+{
+    "C_Cpp.intelliSenseEngine": "default",
+    "idf.espIdfPath": "/home/dominic/esp/esp-idf",
+    "idf.pythonInstallPath": "/usr/bin/python",
+    "idf.openOcdConfigs": [
+        "board/esp32s3-builtin.cfg"
+    ],
+    "idf.port": "/dev/ttyACM0",
+    "idf.toolsPath": "/home/dominic/.espressif",
+    "idf.flashType": "JTAG",
+    "idf.customExtraVars": {
+        "IDF_TARGET": "esp32s3"
+    },
+    "files.associations": {
+        "*.json.liquid": "json",
+        "*.yaml.liquid": "yaml",
+        "*.md.liquid": "markdown",
+        "*.js.liquid": "liquid-javascript",
+        "*.css.liquid": "liquid-css",
+        "*.scss.liquid": "liquid-scss",
+        "tsconfig*.json": "jsonc",
+        "tslint*.json": "jsonc",
+        "*.vbhtml": "razor",
+        "esp_mac.h": "c"
+    }
+}
