@@ -28,8 +28,8 @@ static const char *TAG = "USB2UART";
 #define UART_RX_BUF_SIZE       CONFIG_UART_RX_BUF_SIZE
 #define UART_TX_BUF_SIZE       CONFIG_UART_TX_BUF_SIZE
 
-#define ZG23_RESET_PIN 4
-#define ZG23_BTL_PIN 10
+#define BOARD_ZG23_RESET_PIN   CONFIG_BOARD_ZG23_RESET_PIN
+#define BOARD_ZG23_BTL_PIN     CONFIG_BOARD_ZG23_BTL_PIN
 
 #ifdef CONFIG_UART_AUTO_DOWNLOAD
 #define BOARD_AUTODLD_EN_PIN   CONFIG_BOARD_AUTODLD_EN_PIN
@@ -116,7 +116,7 @@ static bool board_zg23_reset_gpio_init(void)
     //set as output mode
     io_conf.mode = GPIO_MODE_OUTPUT;
     //bit mask of the pins that you want to set
-    io_conf.pin_bit_mask = ((1ULL << ZG23_RESET_PIN) | (1ULL << ZG23_BTL_PIN));
+    io_conf.pin_bit_mask = ((1ULL << BOARD_ZG23_RESET_PIN) | (1ULL << BOARD_ZG23_BTL_PIN));
     //disable pull-down mode
     io_conf.pull_down_en = 0;
     //enable pull-up mode
@@ -217,8 +217,8 @@ static void tinyusb_cdc_line_state_changed_callback(int itf, cdcacm_event_t *eve
         boot = false;
     }
 
-    gpio_set_level(ZG23_BTL_PIN, boot);
-    gpio_set_level(ZG23_RESET_PIN, reset);
+    gpio_set_level(BOARD_ZG23_BTL_PIN, boot);
+    gpio_set_level(BOARD_ZG23_RESET_PIN, reset);
 
 #ifdef CONFIG_UART_AUTO_DOWNLOAD
     bool _io0 = true;
