@@ -1,3 +1,4 @@
 managed_components/
 build/
 sdkconfig.old
+sdkconfig
