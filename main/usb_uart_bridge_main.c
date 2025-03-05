@@ -14,6 +14,7 @@
 #include "esp_mac.h"
 #include "esp_log.h"
 #include "esp_system.h"
+#include "esp_timer.h"
 #include "rom/ets_sys.h"
 
 #include "tinyusb.h"
@@ -181,9 +182,39 @@ static void tinyusb_cdc_rx_callback(int itf, cdcacm_event_t *event)
 {
     /* initialization */
     size_t rx_size = 0;
-    uint8_t rx_buf[USB_RX_BUF_SIZE] = {0};
+    static bool use_rx_buf_0 = true;
+    static uint8_t rx_buf_0[USB_RX_BUF_SIZE] = {0};
+    static uint8_t rx_buf_1[USB_RX_BUF_SIZE] = {0};
+    static int last_rx = 0;
+    bool dup = true;
+    uint8_t *rx_buf = rx_buf_0;
+
+    /* swap buffer if needed (for dup detection) */
+    if (!use_rx_buf_0) {
+        rx_buf = rx_buf_1;
+    }
     /* read from usb */
     esp_err_t ret = tinyusb_cdcacm_read(itf, rx_buf, USB_RX_BUF_SIZE, &rx_size);
+    ESP_LOGD(TAG, "tinyusb_cdc_rx_callback (size: %u)", rx_size);
+    ESP_LOG_BUFFER_HEXDUMP(TAG, rx_buf, rx_size, ESP_LOG_DEBUG);
+    /* do not attempt dup detection if frames are far apart or frame is small */
+    if ((esp_timer_get_time() - last_rx < 100000) && (rx_size > 4)) {
+        ESP_LOGD(TAG, "Checking frame...");
+        /* dup detection */
+        for (size_t i = 0; i < rx_size; i++) {
+            if (rx_buf_0[i] != rx_buf_1[i]) {
+                use_rx_buf_0 = !use_rx_buf_0;
+                dup = false;
+                break;
+            }
+        }
+        if (dup) {
+            ESP_LOGW(TAG, "Duplicate frame");
+            return;
+        }
+    }
+
+    last_rx = esp_timer_get_time();
 
     if (ret == ESP_OK) {
         size_t xfer_size = uart_write_bytes(BOARD_UART_PORT, rx_buf, rx_size);
