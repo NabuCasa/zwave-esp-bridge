@@ -41,6 +41,13 @@ static bool s_reset_trigger = false;
 #define USB_RX_BUF_SIZE CONFIG_USB_RX_BUF_SIZE
 #define USB_TX_BUF_SIZE CONFIG_USB_TX_BUF_SIZE
 
+/*
+ * Re-transmission of Z-Wave Serial API frames from the host happens after 100 ms,
+ * therefore the deduplication timeout should be lower than that to avoid falsely
+ * flagging frames as duplicates.
+ */
+#define USB_DEDUP_TIMEOUT_US 60000
+
 #define CFG_BAUD_RATE(b) (b)
 #define CFG_STOP_BITS(s) (((s)==2)?UART_STOP_BITS_2:(((s)==1)?UART_STOP_BITS_1_5:UART_STOP_BITS_1))
 #define CFG_PARITY(p) (((p)==2)?UART_PARITY_EVEN:(((p)==1)?UART_PARITY_ODD:UART_PARITY_DISABLE))
@@ -197,8 +204,13 @@ static void tinyusb_cdc_rx_callback(int itf, cdcacm_event_t *event)
     esp_err_t ret = tinyusb_cdcacm_read(itf, rx_buf, USB_RX_BUF_SIZE, &rx_size);
     ESP_LOGD(TAG, "tinyusb_cdc_rx_callback (size: %u)", rx_size);
     ESP_LOG_BUFFER_HEXDUMP(TAG, rx_buf, rx_size, ESP_LOG_DEBUG);
-    /* do not attempt dup detection if frames are far apart or frame is small */
-    if ((esp_timer_get_time() - last_rx < 100000) && (rx_size > 4)) {
+
+    /*
+     * Firmware updates on Mac OS (or Apple hardware) frequently fail because the same
+     * USB frames are transmitted again. Attempt to filter out these duplicates, but only
+     * if frames are received within a short time of each other and are not small.
+     */
+    if ((esp_timer_get_time() - last_rx < USB_DEDUP_TIMEOUT_US) && (rx_size > 4)) {
         ESP_LOGD(TAG, "Checking frame...");
         /* dup detection */
         for (size_t i = 0; i < rx_size; i++) {
