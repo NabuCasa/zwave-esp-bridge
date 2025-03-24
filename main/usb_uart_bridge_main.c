@@ -110,19 +110,48 @@ static bool board_autodl_gpio_init(void)
 
 static bool board_zg23_reset_gpio_init(void)
 {
+    // Make sure both pins are inactive before configuring them as outputs.
+    // Otherwise, this will reset the ZG23.
+    gpio_set_level(BOARD_ZG23_RESET_PIN, 1);
+    gpio_set_level(BOARD_ZG23_BTL_PIN, 1);
+
+    // The BOOT line is active low, and not used otherwise.
+    // Set it as an output with a pull-up resistor, so it is in a defined state when not in use.
     gpio_config_t io_conf = {0};
     //disable interrupt
     io_conf.intr_type = GPIO_INTR_DISABLE;
     //set as output mode
     io_conf.mode = GPIO_MODE_OUTPUT;
     //bit mask of the pins that you want to set
-    io_conf.pin_bit_mask = ((1ULL << BOARD_ZG23_RESET_PIN) | (1ULL << BOARD_ZG23_BTL_PIN));
+    io_conf.pin_bit_mask = (1ULL << BOARD_ZG23_BTL_PIN);
     //disable pull-down mode
-    io_conf.pull_down_en = 0;
+    io_conf.pull_down_en = GPIO_PULLDOWN_DISABLE;
     //enable pull-up mode
     io_conf.pull_up_en = GPIO_PULLUP_ENABLE;
     //configure GPIO with the given settings
     esp_err_t ret = gpio_config(&io_conf);
+
+    if (ret != ESP_OK) {
+        return false;
+    }
+
+    // The RESET line has a pull-up resistor and we should not control it
+    // unless we're resetting, because that messes with the ZG23 debugger.
+    // Therefore configure it as an open-drain output, so the debugger
+    // can drive it while we don't.
+    io_conf = (gpio_config_t) {0};
+    //disable interrupt
+    io_conf.intr_type = GPIO_INTR_DISABLE;
+    //set as output mode
+    io_conf.mode = GPIO_MODE_OUTPUT_OD;
+    //bit mask of the pins that you want to set
+    io_conf.pin_bit_mask = (1ULL << BOARD_ZG23_RESET_PIN);
+    //disable pull-down mode
+    io_conf.pull_down_en = GPIO_PULLDOWN_DISABLE;
+    //enable pull-up mode
+    io_conf.pull_up_en = GPIO_PULLUP_DISABLE;
+    //configure GPIO with the given settings
+    ret = gpio_config(&io_conf);
 
     if (ret != ESP_OK) {
         return false;
@@ -361,6 +390,7 @@ void app_main(void)
 {
     board_uart_init();
     board_zg23_reset_gpio_init();
+
 #ifdef CONFIG_UART_AUTO_DOWNLOAD
     board_autodl_gpio_init();
 #endif
