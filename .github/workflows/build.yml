@@ -46,3 +46,20 @@ jobs:
             0x0 bootloader/bootloader.bin \
             0x10000 usb2uart.bin \
             0x8000 partition_table/partition-table.bin
+
+    - name: Debug
+      run: |
+        echo "Listing build directory"
+        ls -la build
+
+    - name: Upload
+      uses: actions/upload-artifact@v4
+      with:
+        name: usb2uart.bin
+        path: build/usb2uart.bin
+
+    - name: Upload
+      uses: actions/upload-artifact@v4
+      with:
+        name: usb2uart_factory.bin
+        path: build/usb2uart_factory.bin
