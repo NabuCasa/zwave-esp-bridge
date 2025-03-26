@@ -14,6 +14,7 @@
 #include "esp_mac.h"
 #include "esp_log.h"
 #include "esp_system.h"
+#include "esp_timer.h"
 #include "rom/ets_sys.h"
 
 #include "tinyusb.h"
@@ -39,6 +40,13 @@ static bool s_reset_trigger = false;
 
 #define USB_RX_BUF_SIZE CONFIG_USB_RX_BUF_SIZE
 #define USB_TX_BUF_SIZE CONFIG_USB_TX_BUF_SIZE
+
+/*
+ * Re-transmission of Z-Wave Serial API frames from the host happens after 100 ms,
+ * therefore the deduplication timeout should be lower than that to avoid falsely
+ * flagging frames as duplicates.
+ */
+#define USB_DEDUP_TIMEOUT_US 60000
 
 #define CFG_BAUD_RATE(b) (b)
 #define CFG_STOP_BITS(s) (((s)==2)?UART_STOP_BITS_2:(((s)==1)?UART_STOP_BITS_1_5:UART_STOP_BITS_1))
@@ -210,9 +218,44 @@ static void tinyusb_cdc_rx_callback(int itf, cdcacm_event_t *event)
 {
     /* initialization */
     size_t rx_size = 0;
-    uint8_t rx_buf[USB_RX_BUF_SIZE] = {0};
+    static bool use_rx_buf_0 = true;
+    static uint8_t rx_buf_0[USB_RX_BUF_SIZE] = {0};
+    static uint8_t rx_buf_1[USB_RX_BUF_SIZE] = {0};
+    static int last_rx = 0;
+    bool dup = true;
+    uint8_t *rx_buf = rx_buf_0;
+
+    /* swap buffer if needed (for dup detection) */
+    if (!use_rx_buf_0) {
+        rx_buf = rx_buf_1;
+    }
     /* read from usb */
     esp_err_t ret = tinyusb_cdcacm_read(itf, rx_buf, USB_RX_BUF_SIZE, &rx_size);
+    ESP_LOGD(TAG, "tinyusb_cdc_rx_callback (size: %u)", rx_size);
+    ESP_LOG_BUFFER_HEXDUMP(TAG, rx_buf, rx_size, ESP_LOG_DEBUG);
+
+    /*
+     * Firmware updates on Mac OS (or Apple hardware) frequently fail because the same
+     * USB frames are transmitted again. Attempt to filter out these duplicates, but only
+     * if frames are received within a short time of each other and are not small.
+     */
+    if ((esp_timer_get_time() - last_rx < USB_DEDUP_TIMEOUT_US) && (rx_size > 4)) {
+        ESP_LOGD(TAG, "Checking frame...");
+        /* dup detection */
+        for (size_t i = 0; i < rx_size; i++) {
+            if (rx_buf_0[i] != rx_buf_1[i]) {
+                use_rx_buf_0 = !use_rx_buf_0;
+                dup = false;
+                break;
+            }
+        }
+        if (dup) {
+            ESP_LOGW(TAG, "Duplicate frame");
+            return;
+        }
+    }
+
+    last_rx = esp_timer_get_time();
 
     if (ret == ESP_OK) {
         size_t xfer_size = uart_write_bytes(BOARD_UART_PORT, rx_buf, rx_size);
