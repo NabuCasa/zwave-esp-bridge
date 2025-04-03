@@ -16,5 +16,8 @@ CONFIG_TINYUSB_DESC_PRODUCT_STRING="ZWA-2"
 CONFIG_TINYUSB_DESC_SERIAL_STRING=""
 CONFIG_TINYUSB_DESC_CDC_STRING="Nabu Casa ZWA-2"
 
+# Raise the limit of the loglevel, so we can change it to something higher
+# than INFO for debugging.
+# This does not have an effect unless the loglevel is actually changed from the default.
 CONFIG_LOG_MAXIMUM_LEVEL_VERBOSE=y
 CONFIG_LOG_MAXIMUM_LEVEL=5

@@ -434,7 +434,9 @@ static void uart_read_task(void *arg)
 
 void app_main(void)
 {
+    // Only for debugging - do not leave uncommented in production:
     // esp_log_level_set(TAG, ESP_LOG_VERBOSE);
+
     board_uart_init();
     board_zg23_reset_gpio_init();
 
