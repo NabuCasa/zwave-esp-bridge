@@ -405,6 +405,9 @@ static void usb_tx_task(void *arg)
             if (_wait_for_usb_tx_done(timeout_ms) != ESP_OK) {
                 xSemaphoreTake(s_usb_tx_requested, 0);
                 ESP_LOGD(TAG, "usb tx timeout");
+                // We do not want to buffer a bunch of data while the host
+                // is not connected, so clear it all
+                tud_cdc_n_write_clear(0);
             }
         } else {
             ulTaskNotifyTake(pdTRUE, 1);
@@ -431,6 +434,9 @@ static void uart_read_task(void *arg)
 
 void app_main(void)
 {
+    // Only for debugging - do not leave uncommented in production:
+    // esp_log_level_set(TAG, ESP_LOG_VERBOSE);
+
     board_uart_init();
     board_zg23_reset_gpio_init();
 
