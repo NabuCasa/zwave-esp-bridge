@@ -46,7 +46,7 @@ static bool s_reset_trigger = false;
  * therefore the deduplication timeout should be lower than that to avoid falsely
  * flagging frames as duplicates.
  */
-#define USB_DEDUP_TIMEOUT_US 60000
+#define USB_DEDUP_TIMEOUT_US 75000
 
 #define CFG_BAUD_RATE(b) (b)
 #define CFG_STOP_BITS(s) (((s)==2)?UART_STOP_BITS_2:(((s)==1)?UART_STOP_BITS_1_5:UART_STOP_BITS_1))
