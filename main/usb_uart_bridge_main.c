@@ -239,20 +239,34 @@ static void tinyusb_cdc_rx_callback(int itf, cdcacm_event_t *event)
      * USB frames are transmitted again. Attempt to filter out these duplicates, but only
      * if frames are received within a short time of each other and are not small.
      */
-    if ((esp_timer_get_time() - last_rx < USB_DEDUP_TIMEOUT_US) && (rx_size > 4)) {
+    if (
+        (esp_timer_get_time() - last_rx < USB_DEDUP_TIMEOUT_US)
+        && (rx_size > 4)
+        // Only do this for 115200 baud, which is the default Z-Wave Serial API baud rate.
+        // On higher baudrates, assume that we're talking to something else that might be
+        // more timing sensitive and allows duplicates
+        && (s_baud_rate_active == 115200)
+    ) {
         ESP_LOGD(TAG, "Checking frame...");
         /* dup detection */
         for (size_t i = 0; i < rx_size; i++) {
             if (rx_buf_0[i] != rx_buf_1[i]) {
-                use_rx_buf_0 = !use_rx_buf_0;
                 dup = false;
                 break;
             }
         }
+        // Swap the buffers for the next comparison
+        use_rx_buf_0 = !use_rx_buf_0;
         if (dup) {
             ESP_LOGW(TAG, "Duplicate frame");
             return;
         }
+    } else {
+        // Do not perform duplicate detection but swap the buffers anyways.
+        // Otherwise a frame may be falsely considered a duplicate if it
+        // is was re-transmitted after several seconds, but the host sent an ACK
+        // within the deduplication timeout.
+        use_rx_buf_0 = !use_rx_buf_0;
     }
 
     last_rx = esp_timer_get_time();
