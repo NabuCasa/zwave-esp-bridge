@@ -42,13 +42,6 @@ static bool s_reset_trigger = false;
 #define USB_TX_BUF_SIZE CONFIG_USB_TX_BUF_SIZE
 #define USB_RX_TO_UART_BUF_SIZE (USB_RX_BUF_SIZE * 4)
 
-/*
- * Re-transmission of Z-Wave Serial API frames from the host happens after 100 ms,
- * therefore the deduplication timeout should be lower than that to avoid falsely
- * flagging frames as duplicates.
- */
-#define USB_DEDUP_TIMEOUT_US 75000
-
 #define CFG_BAUD_RATE(b) (b)
 #define CFG_STOP_BITS(s) (((s)==2)?UART_STOP_BITS_2:(((s)==1)?UART_STOP_BITS_1_5:UART_STOP_BITS_1))
 #define CFG_PARITY(p) (((p)==2)?UART_PARITY_EVEN:(((p)==1)?UART_PARITY_ODD:UART_PARITY_DISABLE))
@@ -220,60 +213,14 @@ static void tinyusb_cdc_rx_callback(int itf, cdcacm_event_t *event)
 {
     /* initialization */
     size_t rx_size = 0;
-    static bool use_rx_buf_0 = true;
-    static uint8_t rx_buf_0[USB_RX_BUF_SIZE] = {0};
-    static uint8_t rx_buf_1[USB_RX_BUF_SIZE] = {0};
-    static int last_rx = 0;
-    bool dup = true;
-    uint8_t *rx_buf = rx_buf_0;
+    static uint8_t rx_buf[USB_RX_BUF_SIZE] = {0};
 
-    /* swap buffer if needed (for dup detection) */
-    if (!use_rx_buf_0) {
-        rx_buf = rx_buf_1;
-    }
     /* read from usb */
     esp_err_t ret = tinyusb_cdcacm_read(itf, rx_buf, USB_RX_BUF_SIZE, &rx_size);
     ESP_LOGD(TAG, "tinyusb_cdc_rx_callback (size: %u)", rx_size);
     ESP_LOG_BUFFER_HEXDUMP(TAG, rx_buf, rx_size, ESP_LOG_DEBUG);
 
-    /*
-     * Firmware updates on Mac OS (or Apple hardware) frequently fail because the same
-     * USB frames are transmitted again. Attempt to filter out these duplicates, but only
-     * if frames are received within a short time of each other and are not small.
-     */
-    if (
-        (esp_timer_get_time() - last_rx < USB_DEDUP_TIMEOUT_US)
-        && (rx_size > 4)
-        // Only do this for 115200 baud, which is the default Z-Wave Serial API baud rate.
-        // On higher baudrates, assume that we're talking to something else that might be
-        // more timing sensitive and allows duplicates
-        && (s_baud_rate_active == 115200)
-    ) {
-        ESP_LOGD(TAG, "Checking frame...");
-        /* dup detection */
-        for (size_t i = 0; i < rx_size; i++) {
-            if (rx_buf_0[i] != rx_buf_1[i]) {
-                dup = false;
-                break;
-            }
-        }
-        // Swap the buffers for the next comparison
-        use_rx_buf_0 = !use_rx_buf_0;
-        if (dup) {
-            ESP_LOGW(TAG, "Duplicate frame");
-            return;
-        }
-    } else {
-        // Do not perform duplicate detection but swap the buffers anyways.
-        // Otherwise a frame may be falsely considered a duplicate if it
-        // is was re-transmitted after several seconds, but the host sent an ACK
-        // within the deduplication timeout.
-        use_rx_buf_0 = !use_rx_buf_0;
-    }
-
-    last_rx = esp_timer_get_time();
-
-    if (!dup) {
+    if (ret == ESP_OK && rx_size > 0) {
         BaseType_t send_res = xRingbufferSend(s_usb_rx_ringbuf, rx_buf, rx_size, 0);
         if (send_res != pdTRUE) {
             ESP_LOGE(TAG, "USB RX to UART RingBuf: Buffer full, %u bytes lost", rx_size);
