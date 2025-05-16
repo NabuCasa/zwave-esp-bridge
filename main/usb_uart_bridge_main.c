@@ -40,6 +40,7 @@ static bool s_reset_trigger = false;
 
 #define USB_RX_BUF_SIZE CONFIG_USB_RX_BUF_SIZE
 #define USB_TX_BUF_SIZE CONFIG_USB_TX_BUF_SIZE
+#define USB_RX_TO_UART_BUF_SIZE (USB_RX_BUF_SIZE * 4)
 
 /*
  * Re-transmission of Z-Wave Serial API frames from the host happens after 100 ms,
@@ -71,6 +72,7 @@ volatile bool s_reset_to_flash = false;
 volatile bool s_wait_reset = false;
 volatile bool s_in_boot = false;
 static RingbufHandle_t s_usb_tx_ringbuf = NULL;
+static RingbufHandle_t s_usb_rx_ringbuf = NULL;
 static SemaphoreHandle_t s_usb_tx_requested = NULL;
 static SemaphoreHandle_t s_usb_tx_done = NULL;
 
@@ -271,14 +273,13 @@ static void tinyusb_cdc_rx_callback(int itf, cdcacm_event_t *event)
 
     last_rx = esp_timer_get_time();
 
-    if (ret == ESP_OK) {
-        size_t xfer_size = uart_write_bytes(BOARD_UART_PORT, rx_buf, rx_size);
-        if (xfer_size != rx_size) {
-            ESP_LOGD(TAG, "uart write lost (%d/%d)", xfer_size, rx_size);
+    if (!dup) {
+        BaseType_t send_res = xRingbufferSend(s_usb_rx_ringbuf, rx_buf, rx_size, 0);
+        if (send_res != pdTRUE) {
+            ESP_LOGE(TAG, "USB RX to UART RingBuf: Buffer full, %u bytes lost", rx_size);
+        } else {
+            ESP_LOGD(TAG, "USB RX to UART RingBuf: Queued %u bytes", rx_size);
         }
-        ESP_LOGD(TAG, "uart write data (%d bytes): %s", rx_size, rx_buf);
-    } else {
-        ESP_LOGE(TAG, "usb read error");
     }
 }
 
@@ -446,6 +447,27 @@ static void uart_read_task(void *arg)
     }
 }
 
+static void uart_writer_task(void *arg) {
+    uint8_t data_to_uart[CONFIG_USB_RX_BUF_SIZE];
+    size_t rx_size;
+
+    while (1) {
+        uint8_t *rx_buf = (uint8_t *)xRingbufferReceiveUpTo(s_usb_rx_ringbuf, &rx_size, pdMS_TO_TICKS(portMAX_DELAY), sizeof(data_to_uart));
+
+        if (!rx_buf || rx_size == 0) {
+            continue;
+        }
+
+        size_t xfer_size = uart_write_bytes(BOARD_UART_PORT, rx_buf, rx_size);
+        if (xfer_size != rx_size) {
+            ESP_LOGD(TAG, "uart write lost (%d/%d)", xfer_size, rx_size);
+        }
+        ESP_LOGD(TAG, "uart write data (%d bytes): %s", rx_size, rx_buf);
+
+        vRingbufferReturnItem(s_usb_rx_ringbuf, (void *)rx_buf);
+    }
+}
+
 void app_main(void)
 {
     // Only for debugging - do not leave uncommented in production:
@@ -461,7 +483,13 @@ void app_main(void)
     s_usb_tx_done = xSemaphoreCreateBinary();
     s_usb_tx_requested = xSemaphoreCreateBinary();
     if (s_usb_tx_ringbuf == NULL) {
-        ESP_LOGE(TAG, "Creation buffer error");
+        ESP_LOGE(TAG, "USB TX buffer creation error");
+        assert(0);
+    }
+
+    s_usb_rx_ringbuf = xRingbufferCreate(USB_RX_TO_UART_BUF_SIZE, RINGBUF_TYPE_BYTEBUF);
+    if (s_usb_rx_ringbuf == NULL) {
+        ESP_LOGE(TAG, "USB RX buffer creation error");
         assert(0);
     }
 
@@ -524,6 +552,7 @@ void app_main(void)
 
     TaskHandle_t usb_tx_handle = NULL;
     xTaskCreate(usb_tx_task, "usb_tx", 4096, NULL, 4, &usb_tx_handle);
+    xTaskCreate(uart_writer_task, "uart_write", 4096, NULL, 4, NULL);
     vTaskDelay(pdMS_TO_TICKS(500));
     xTaskCreate(uart_read_task, "uart_rx", 4096, (void *)usb_tx_handle, 4, NULL);
 
