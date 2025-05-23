@@ -33,12 +33,6 @@ static const char *TAG = "USB2UART";
 #define BOARD_ZG23_RESET_PIN   CONFIG_BOARD_ZG23_RESET_PIN
 #define BOARD_ZG23_BTL_PIN     CONFIG_BOARD_ZG23_BTL_PIN
 
-#ifdef CONFIG_UART_AUTO_DOWNLOAD
-#define BOARD_AUTODLD_EN_PIN   CONFIG_BOARD_AUTODLD_EN_PIN
-#define BOARD_AUTODLD_BOOT_PIN CONFIG_BOARD_AUTODLD_BOOT_PIN
-static bool s_reset_trigger = false;
-#endif
-
 #define USB_RX_BUF_SIZE CONFIG_USB_RX_BUF_SIZE
 #define USB_TX_BUF_SIZE CONFIG_USB_TX_BUF_SIZE
 
@@ -66,31 +60,6 @@ volatile bool s_wait_reset = false;
 volatile bool s_in_boot = false;
 static RingbufHandle_t s_usb_tx_ringbuf = NULL;
 static RingbufHandle_t s_usb_rx_ringbuf = NULL;
-
-#ifdef CONFIG_UART_AUTO_DOWNLOAD
-static bool board_autodl_gpio_init(void)
-{
-    gpio_config_t io_conf = {0};
-    //disable interrupt
-    io_conf.intr_type = GPIO_INTR_DISABLE;
-    //set as output mode
-    io_conf.mode = GPIO_MODE_OUTPUT;
-    //bit mask of the pins that you want to set
-    io_conf.pin_bit_mask = ((1ULL << BOARD_AUTODLD_EN_PIN) | (1ULL << BOARD_AUTODLD_BOOT_PIN));
-    //disable pull-down mode
-    io_conf.pull_down_en = 0;
-    //disable pull-up mode
-    io_conf.pull_up_en = GPIO_PULLUP_ENABLE;
-    //configure GPIO with the given settings
-    esp_err_t ret = gpio_config(&io_conf);
-
-    if (ret != ESP_OK) {
-        return false;
-    }
-
-    return true;
-}
-#endif
 
 static bool board_zg23_reset_gpio_init(void)
 {
@@ -219,31 +188,6 @@ static void tinyusb_cdc_line_state_changed_callback(int itf, cdcacm_event_t *eve
 
     gpio_set_level(BOARD_ZG23_BTL_PIN, boot);
     gpio_set_level(BOARD_ZG23_RESET_PIN, reset);
-
-#ifdef CONFIG_UART_AUTO_DOWNLOAD
-    bool _io0 = true;
-    bool _en = true;
-    if (dtr == 1 && rts == 0) { //esptool ~100ms
-        _io0 = false;
-        _en = true;
-    }
-
-    if (dtr == 0 && rts == 1) {
-        _io0 = true;
-        _en = false;
-    }
-
-    s_reset_trigger = false;
-    if (dtr & rts) {
-        ESP_LOGW(TAG, "...");
-        s_reset_trigger = true;
-    } else {
-        ESP_LOGI(TAG, "DTR = %d, RTS = %d -> BOOT = %d, RST = %d", dtr, rts, _io0, _en);
-        gpio_set_level(BOARD_AUTODLD_BOOT_PIN, _io0);
-        gpio_set_level(BOARD_AUTODLD_EN_PIN, _en);
-    }
-#endif
-
 }
 
 static void tinyusb_cdc_line_coding_changed_callback(int itf, cdcacm_event_t *event)
@@ -463,9 +407,6 @@ void app_main(void)
 
     board_zg23_reset_gpio_init();
 
-#ifdef CONFIG_UART_AUTO_DOWNLOAD
-    board_autodl_gpio_init();
-#endif
     s_usb_tx_ringbuf = xRingbufferCreate(USB_TX_BUF_SIZE, RINGBUF_TYPE_BYTEBUF);
     if (s_usb_tx_ringbuf == NULL) {
         ESP_LOGE(TAG, "USB TX buffer creation error");
@@ -557,20 +498,6 @@ void app_main(void)
     ESP_LOGI(TAG, "USB initialization DONE");
 
     while (1) {
-#ifdef CONFIG_UART_AUTO_DOWNLOAD
-        static size_t trigger_reset = 0;
-        const size_t threshold_reset = 10;
-
-        if ((s_reset_trigger) && ++trigger_reset > threshold_reset) {
-            trigger_reset = 0;
-            s_reset_trigger = false;
-            gpio_set_level(BOARD_AUTODLD_BOOT_PIN, true);
-            gpio_set_level(BOARD_AUTODLD_EN_PIN, true);
-            ESP_LOGI(TAG, "DTR = %d, RTS = %d -> BOOT = %d, RST = %d", 1, 1, 1, 1);
-        } else {
-            trigger_reset = 0;
-        }
-#endif
         vTaskDelay(pdMS_TO_TICKS(1));
     }
 }
