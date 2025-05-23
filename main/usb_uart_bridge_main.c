@@ -16,12 +16,17 @@
 #include "esp_system.h"
 #include "esp_timer.h"
 #include "rom/ets_sys.h"
+#include "soc/rtc_cntl_reg.h"
 
 #include "tinyusb.h"
 #include "tusb.h"
 #include "tusb_cdc_acm.h"
 
 static const char *TAG = "USB2UART";
+
+// To allow entering the ESP32 bootloader *without* RTS/DTR, set this specific baudrate
+// on the serial port. This will reboot the device into the ESP32 bootloader.
+#define MAGIC_BOOTLOADER_TRIGGER_BAUDRATE  123456
 
 #define BOARD_UART_PORT        UART_NUM_1
 #define BOARD_UART_TXD_PIN     CONFIG_BOARD_UART_TXD_PIN
@@ -197,6 +202,15 @@ static void tinyusb_cdc_line_coding_changed_callback(int itf, cdcacm_event_t *ev
     uint8_t parity = event->line_coding_changed_data.p_line_coding->parity;
     uint8_t data_bits = event->line_coding_changed_data.p_line_coding->data_bits;
     ESP_LOGV(TAG, "host require bit_rate=%" PRIu32 " stop_bits=%u parity=%u data_bits=%u", bit_rate, stop_bits, parity, data_bits);
+
+    if (bit_rate == MAGIC_BOOTLOADER_TRIGGER_BAUDRATE) {
+        ESP_LOGW(TAG, "Magic bootloader baudrate requested, rebooting into the ESP bootloader!");
+
+        REG_WRITE(RTC_CNTL_OPTION1_REG, RTC_CNTL_FORCE_DOWNLOAD_BOOT);
+        esp_restart();
+
+        return;
+    }
 
     if (s_baud_rate_active != bit_rate) {
         if (ESP_OK == uart_set_baudrate(BOARD_UART_PORT, CFG_BAUD_RATE(bit_rate))) {
@@ -498,6 +512,6 @@ void app_main(void)
     ESP_LOGI(TAG, "USB initialization DONE");
 
     while (1) {
-        vTaskDelay(pdMS_TO_TICKS(1));
+        vTaskDelay(pdMS_TO_TICKS(100));
     }
 }
