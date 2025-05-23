@@ -400,6 +400,7 @@ static void uart_writer_task(void *arg) {
     size_t rx_size;
 
     while (1) {
+        ESP_LOGD(TAG, "waiting for data to send to uart");
         uint8_t *rx_buf = (uint8_t *)xRingbufferReceiveUpTo(s_usb_rx_ringbuf, &rx_size, pdMS_TO_TICKS(portMAX_DELAY), sizeof(data_to_uart));
 
         if (!rx_buf) {
@@ -418,6 +419,8 @@ static void uart_writer_task(void *arg) {
             ESP_LOGD(TAG, "uart write lost (%d/%d)", xfer_size, rx_size);
         }
 
+        ESP_LOGD(TAG, "waiting for UART buffer to flush");
+        ESP_ERROR_CHECK(uart_wait_tx_done(BOARD_UART_PORT, pdMS_TO_TICKS(portMAX_DELAY)));
     }
 }
 
