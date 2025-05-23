@@ -401,17 +401,22 @@ static void uart_writer_task(void *arg) {
     while (1) {
         uint8_t *rx_buf = (uint8_t *)xRingbufferReceiveUpTo(s_usb_rx_ringbuf, &rx_size, pdMS_TO_TICKS(portMAX_DELAY), sizeof(data_to_uart));
 
-        if (!rx_buf || rx_size == 0) {
+        if (!rx_buf) {
+            continue;
+        } else if (rx_size == 0) {
+            vRingbufferReturnItem(s_usb_rx_ringbuf, (void *)rx_buf);
             continue;
         }
 
-        size_t xfer_size = uart_write_bytes(BOARD_UART_PORT, rx_buf, rx_size);
+        memcpy(data_to_uart, rx_buf, rx_size);
+        vRingbufferReturnItem(s_usb_rx_ringbuf, (void *)rx_buf);
+
+        size_t xfer_size = uart_write_bytes(BOARD_UART_PORT, data_to_uart, rx_size);
+
         if (xfer_size != rx_size) {
             ESP_LOGD(TAG, "uart write lost (%d/%d)", xfer_size, rx_size);
         }
-        ESP_LOGD(TAG, "uart write data (%d bytes): %s", rx_size, rx_buf);
 
-        vRingbufferReturnItem(s_usb_rx_ringbuf, (void *)rx_buf);
     }
 }
 
