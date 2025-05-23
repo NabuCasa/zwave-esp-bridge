@@ -494,7 +494,7 @@ void app_main(void)
 
     ESP_ERROR_CHECK(tinyusb_driver_install(&tusb_cfg));
 
-    tinyusb_config_cdcacm_t amc_cfg = {
+    tinyusb_config_cdcacm_t acm_cfg = {
         .usb_dev = TINYUSB_USBDEV_0,
         .cdc_port = TINYUSB_CDC_ACM_0,
         .rx_unread_buf_sz = USB_RX_BUF_SIZE,
@@ -504,7 +504,7 @@ void app_main(void)
         .callback_line_coding_changed = &tinyusb_cdc_line_coding_changed_callback
     };
 
-    ESP_ERROR_CHECK(tusb_cdc_acm_init(&amc_cfg));
+    ESP_ERROR_CHECK(tusb_cdc_acm_init(&acm_cfg));
 
     TaskHandle_t usb_tx_handle = NULL;
     xTaskCreate(usb_tx_task, "usb_tx", 4096, NULL, 4, &usb_tx_handle);
