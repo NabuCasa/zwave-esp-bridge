@@ -362,8 +362,9 @@ static void usb_tx_task(void *arg)
             size_t ret = tinyusb_cdcacm_write_queue(0, data, rx_data_size);
             ESP_LOGV(TAG, "usb tx data size = %d ret=%u", rx_data_size, ret);
             tud_cdc_n_write_flush(0);
-            //We wait for 10 times of the time it takes to send the data
-            uint32_t timeout_ms = 10 * (rx_data_size / 64 / 19 + 1);
+
+            // We wait for 10 times of the time it takes to send the data
+            uint32_t timeout_ms = 10 * (1000 * (uint32_t)rx_data_size / s_baud_rate_active);
             if (_wait_for_usb_tx_done(timeout_ms) != ESP_OK) {
                 xSemaphoreTake(s_usb_tx_requested, 0);
                 ESP_LOGD(TAG, "usb tx timeout");
