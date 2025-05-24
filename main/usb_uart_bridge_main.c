@@ -299,25 +299,24 @@ static void tinyusb_cdc_line_coding_changed_callback(int itf, cdcacm_event_t *ev
     }
 }
 
-static esp_err_t _usb_tx_ringbuf_read(uint8_t *out_buf, size_t req_bytes, size_t *read_bytes)
+static esp_err_t _ringbuf_read_bytes(RingbufHandle_t ring_buf, uint8_t *out_buf, size_t req_bytes, size_t *read_bytes, TickType_t xTicksToWait)
 {
-    uint8_t *buf = xRingbufferReceiveUpTo(s_usb_tx_ringbuf, read_bytes, 0, req_bytes);
+    uint8_t *buf = xRingbufferReceiveUpTo(ring_buf, read_bytes, xTicksToWait, req_bytes);
 
     if (buf) {
         memcpy(out_buf, buf, *read_bytes);
-        vRingbufferReturnItem(s_usb_tx_ringbuf, (void *)(buf));
+        vRingbufferReturnItem(ring_buf, (void *)(buf));
         return ESP_OK;
     } else {
         return ESP_FAIL;
     }
 }
 
-static esp_err_t usb_tx_ringbuf_read(uint8_t *out_buf, size_t out_buf_sz, size_t *rx_data_size)
+static esp_err_t ringbuf_read_bytes(RingbufHandle_t ring_buf, uint8_t *out_buf, size_t out_buf_sz, size_t *rx_data_size, TickType_t xTicksToWait)
 {
-
     size_t read_sz;
 
-    esp_err_t res = _usb_tx_ringbuf_read(out_buf, out_buf_sz, &read_sz);
+    esp_err_t res = _ringbuf_read_bytes(ring_buf, out_buf, out_buf_sz, &read_sz, xTicksToWait);
 
     if (res != ESP_OK) {
         return res;
@@ -326,7 +325,7 @@ static esp_err_t usb_tx_ringbuf_read(uint8_t *out_buf, size_t out_buf_sz, size_t
     *rx_data_size = read_sz;
 
     /* Buffer's data can be wrapped, at that situations we should make another retrievement */
-    if (_usb_tx_ringbuf_read(out_buf + read_sz, out_buf_sz - read_sz, &read_sz) == ESP_OK) {
+    if (_ringbuf_read_bytes(ring_buf, out_buf + read_sz, out_buf_sz - read_sz, &read_sz, xTicksToWait) == ESP_OK) {
         *rx_data_size += read_sz;
     }
 
@@ -346,7 +345,7 @@ static void usb_tx_task(void *arg)
         ulTaskNotifyTake(pdTRUE, pdMS_TO_TICKS(portMAX_DELAY));
 
         // When we do wake up, we can be sure there is data in the ring buffer
-        esp_err_t ret = usb_tx_ringbuf_read(data, USB_TX_BUF_SIZE, &tx_data_size);
+        esp_err_t ret = ringbuf_read_bytes(s_usb_tx_ringbuf, data, USB_TX_BUF_SIZE, &tx_data_size, 0);
 
         if (ret != ESP_OK) {
             ESP_LOGE(TAG, "usb tx ringbuf read failed");
@@ -385,7 +384,7 @@ static void uart_read_task(void *arg)
     uint8_t data[UART_RX_BUF_SIZE] = {0};
 
     while (1) {
-        const int rx_data_size = uart_read_bytes(BOARD_UART_PORT, data, UART_RX_BUF_SIZE, 1);
+        const int rx_data_size = uart_read_bytes(BOARD_UART_PORT, data, UART_RX_BUF_SIZE, pdMS_TO_TICKS(portMAX_DELAY));
         if (rx_data_size > 0) {
             int res = xRingbufferSend(s_usb_tx_ringbuf, data, rx_data_size, 0);
             if (res != pdTRUE) {
@@ -403,17 +402,16 @@ static void uart_writer_task(void *arg) {
 
     while (1) {
         ESP_LOGD(TAG, "waiting for data to send to uart");
-        uint8_t *rx_buf = (uint8_t *)xRingbufferReceiveUpTo(s_usb_rx_ringbuf, &rx_size, pdMS_TO_TICKS(portMAX_DELAY), sizeof(data_to_uart));
+        esp_err_t ret = ringbuf_read_bytes(s_usb_rx_ringbuf, data_to_uart, sizeof(data_to_uart), &rx_size, pdMS_TO_TICKS(portMAX_DELAY));
 
-        if (!rx_buf) {
-            continue;
-        } else if (rx_size == 0) {
-            vRingbufferReturnItem(s_usb_rx_ringbuf, (void *)rx_buf);
+        if (ret != ESP_OK) {
+            ESP_LOGE(TAG, "usb rx ringbuf read failed");
             continue;
         }
 
-        memcpy(data_to_uart, rx_buf, rx_size);
-        vRingbufferReturnItem(s_usb_rx_ringbuf, (void *)rx_buf);
+        if (rx_size == 0) {
+            continue;
+        }
 
         size_t xfer_size = uart_write_bytes(BOARD_UART_PORT, data_to_uart, rx_size);
 
