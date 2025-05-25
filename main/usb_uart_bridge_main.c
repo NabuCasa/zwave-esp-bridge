@@ -378,7 +378,7 @@ static void usb_tx_task(void *arg)
     }
 }
 
-static void uart_read_task(void *arg)
+static void uart_rx_task(void *arg)
 {
     TaskHandle_t usb_tx_handle = (TaskHandle_t)arg;
     uint8_t data[UART_RX_BUF_SIZE] = {0};
@@ -396,7 +396,7 @@ static void uart_read_task(void *arg)
     }
 }
 
-static void uart_writer_task(void *arg) {
+static void uart_tx_task(void *arg) {
     uint8_t data_to_uart[CONFIG_USB_RX_BUF_SIZE];
     size_t rx_size;
 
@@ -506,9 +506,10 @@ void app_main(void)
 
     TaskHandle_t usb_tx_handle = NULL;
     xTaskCreate(usb_tx_task, "usb_tx", 4096, &acm_cfg, 4, &usb_tx_handle);
-    xTaskCreate(uart_writer_task, "uart_write", 4096, NULL, 4, NULL);
+    xTaskCreate(uart_tx_task, "uart_tx", 4096, NULL, 4, NULL);
+
     vTaskDelay(pdMS_TO_TICKS(500));
-    xTaskCreate(uart_read_task, "uart_rx", 4096, (void *)usb_tx_handle, 4, NULL);
+    xTaskCreate(uart_rx_task, "uart_rx", 4096, (void *)usb_tx_handle, 4, NULL);
 
     ESP_LOGI(TAG, "USB initialization DONE");
 
