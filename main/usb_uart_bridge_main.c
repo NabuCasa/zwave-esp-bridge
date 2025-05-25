@@ -325,7 +325,7 @@ static esp_err_t ringbuf_read_bytes(RingbufHandle_t ring_buf, uint8_t *out_buf, 
     *rx_data_size = read_sz;
 
     /* Buffer's data can be wrapped, at that situations we should make another retrievement */
-    if (_ringbuf_read_bytes(ring_buf, out_buf + read_sz, out_buf_sz - read_sz, &read_sz, xTicksToWait) == ESP_OK) {
+    if (_ringbuf_read_bytes(ring_buf, out_buf + read_sz, out_buf_sz - read_sz, &read_sz, 0) == ESP_OK) {
         *rx_data_size += read_sz;
     }
 
