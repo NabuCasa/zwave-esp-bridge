@@ -326,7 +326,7 @@ static void usb_tx_task(void *arg)
 
     while (1) {
         // Wait for a notification from the UART read task
-        ulTaskNotifyTake(pdTRUE, pdMS_TO_TICKS(portMAX_DELAY));
+        ulTaskNotifyTake(pdTRUE, portMAX_DELAY);
 
         // When we do wake up, we can be sure there is data in the ring buffer
         esp_err_t ret = ringbuf_read_bytes(s_usb_tx_ringbuf, data, USB_TX_BUF_SIZE, &tx_data_size, 0);
@@ -377,7 +377,7 @@ static void uart_rx_task(void *arg)
     uart_event_t event;
 
     while (1) {
-        if (xQueueReceive(uart_queue, (void *)&event, pdMS_TO_TICKS(portMAX_DELAY))) {
+        if (xQueueReceive(uart_queue, (void *)&event, portMAX_DELAY)) {
             switch (event.type) {
                 case UART_DATA:
                     const int rx_data_size = uart_read_bytes(BOARD_UART_PORT, data, MIN(UART_RX_BUF_SIZE, event.size), 0);
@@ -407,7 +407,7 @@ static void uart_tx_task(void *arg) {
 
     while (1) {
         ESP_LOGD(TAG, "waiting for data to send to uart");
-        esp_err_t ret = ringbuf_read_bytes(s_usb_rx_ringbuf, data_to_uart, sizeof(data_to_uart), &rx_size, pdMS_TO_TICKS(portMAX_DELAY));
+        esp_err_t ret = ringbuf_read_bytes(s_usb_rx_ringbuf, data_to_uart, sizeof(data_to_uart), &rx_size, portMAX_DELAY);
 
         if (ret != ESP_OK) {
             ESP_LOGE(TAG, "usb rx ringbuf read failed");
@@ -421,7 +421,7 @@ static void uart_tx_task(void *arg) {
         }
 
         ESP_LOGD(TAG, "waiting for UART buffer to flush");
-        ESP_ERROR_CHECK(uart_wait_tx_done(BOARD_UART_PORT, pdMS_TO_TICKS(portMAX_DELAY)));
+        ESP_ERROR_CHECK(uart_wait_tx_done(BOARD_UART_PORT, portMAX_DELAY));
     }
 }
 
