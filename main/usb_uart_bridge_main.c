@@ -28,6 +28,7 @@ static const char *TAG = "USB2UART";
 #define BOARD_UART_RXD_PIN     CONFIG_BOARD_UART_RXD_PIN
 #define UART_RX_BUF_SIZE       CONFIG_UART_RX_BUF_SIZE
 #define UART_TX_BUF_SIZE       CONFIG_UART_TX_BUF_SIZE
+#define UART_QUEUE_SIZE        16
 
 #define BOARD_ZG23_RESET_PIN   CONFIG_BOARD_ZG23_RESET_PIN
 #define BOARD_ZG23_BTL_PIN     CONFIG_BOARD_ZG23_BTL_PIN
@@ -65,23 +66,6 @@ volatile bool s_wait_reset = false;
 volatile bool s_in_boot = false;
 static RingbufHandle_t s_usb_tx_ringbuf = NULL;
 static RingbufHandle_t s_usb_rx_ringbuf = NULL;
-
-static void board_uart_init(void)
-{
-    uart_config_t uart_config = {
-        .baud_rate = CFG_BAUD_RATE(s_baud_rate_active),
-        .data_bits = CFG_DATA_BITS(s_data_bits_active),
-        .parity = CFG_PARITY(s_parity_active),
-        .stop_bits = CFG_STOP_BITS(s_stop_bits_active),
-        .flow_ctrl = UART_HW_FLOWCTRL_DISABLE,
-        .source_clk = UART_SCLK_APB,
-    };
-
-    uart_driver_install(BOARD_UART_PORT, UART_RX_BUF_SIZE, UART_TX_BUF_SIZE, 0, NULL, 0);
-    uart_param_config(BOARD_UART_PORT, &uart_config);
-    uart_set_pin(BOARD_UART_PORT, BOARD_UART_TXD_PIN, BOARD_UART_RXD_PIN, UART_PIN_NO_CHANGE, UART_PIN_NO_CHANGE);
-    ESP_LOGI(TAG, "init UART%d: %"PRIu32 " %s %s %s", BOARD_UART_PORT, s_baud_rate_active, STR_DATA_BITS(s_data_bits_active), STR_PARITY(s_parity_active), STR_STOP_BITS(s_stop_bits_active));
-}
 
 #ifdef CONFIG_UART_AUTO_DOWNLOAD
 static bool board_autodl_gpio_init(void)
@@ -378,20 +362,41 @@ static void usb_tx_task(void *arg)
     }
 }
 
+typedef struct uart_rx_task_param_t {
+    TaskHandle_t usb_tx_handle;
+    QueueHandle_t uart_queue;
+} uart_rx_task_param_t;
+
+
 static void uart_rx_task(void *arg)
 {
-    TaskHandle_t usb_tx_handle = (TaskHandle_t)arg;
+    TaskHandle_t usb_tx_handle = ((uart_rx_task_param_t*)arg)->usb_tx_handle;
+    QueueHandle_t uart_queue = ((uart_rx_task_param_t*)arg)->uart_queue;
+
     uint8_t data[UART_RX_BUF_SIZE] = {0};
+    uart_event_t event;
 
     while (1) {
-        const int rx_data_size = uart_read_bytes(BOARD_UART_PORT, data, UART_RX_BUF_SIZE, pdMS_TO_TICKS(portMAX_DELAY));
-        if (rx_data_size > 0) {
-            int res = xRingbufferSend(s_usb_tx_ringbuf, data, rx_data_size, 0);
-            if (res != pdTRUE) {
-                ESP_LOGW(TAG, "The unread buffer is too small, the data has been lost");
-            }
+        if (xQueueReceive(uart_queue, (void *)&event, pdMS_TO_TICKS(portMAX_DELAY))) {
+            switch (event.type) {
+                case UART_DATA:
+                    const int rx_data_size = uart_read_bytes(BOARD_UART_PORT, data, MIN(UART_RX_BUF_SIZE, event.size), 0);
 
-            xTaskNotifyGive(usb_tx_handle);
+                    if (rx_data_size > 0) {
+                        int res = xRingbufferSend(s_usb_tx_ringbuf, data, rx_data_size, 0);
+                        if (res != pdTRUE) {
+                            ESP_LOGW(TAG, "The unread buffer is too small, the data has been lost");
+                        }
+
+                        xTaskNotifyGive(usb_tx_handle);
+                    }
+
+                    break;
+
+                default:
+                    ESP_LOGI(TAG, "uart event type: %d", event.type);
+                    break;
+            }
         }
     }
 }
@@ -406,10 +411,6 @@ static void uart_tx_task(void *arg) {
 
         if (ret != ESP_OK) {
             ESP_LOGE(TAG, "usb rx ringbuf read failed");
-            continue;
-        }
-
-        if (rx_size == 0) {
             continue;
         }
 
@@ -429,7 +430,21 @@ void app_main(void)
     // Only for debugging - do not leave uncommented in production:
     //esp_log_level_set("*", ESP_LOG_VERBOSE);
 
-    board_uart_init();
+    uart_config_t uart_config = {
+        .baud_rate = CFG_BAUD_RATE(s_baud_rate_active),
+        .data_bits = CFG_DATA_BITS(s_data_bits_active),
+        .parity = CFG_PARITY(s_parity_active),
+        .stop_bits = CFG_STOP_BITS(s_stop_bits_active),
+        .flow_ctrl = UART_HW_FLOWCTRL_DISABLE,
+        .source_clk = UART_SCLK_APB,
+    };
+
+    QueueHandle_t uart_queue = NULL;
+    uart_driver_install(BOARD_UART_PORT, UART_RX_BUF_SIZE, UART_TX_BUF_SIZE, UART_QUEUE_SIZE, &uart_queue, 0);
+    uart_param_config(BOARD_UART_PORT, &uart_config);
+    uart_set_pin(BOARD_UART_PORT, BOARD_UART_TXD_PIN, BOARD_UART_RXD_PIN, UART_PIN_NO_CHANGE, UART_PIN_NO_CHANGE);
+    ESP_LOGI(TAG, "init UART%d: %"PRIu32 " %s %s %s", BOARD_UART_PORT, s_baud_rate_active, STR_DATA_BITS(s_data_bits_active), STR_PARITY(s_parity_active), STR_STOP_BITS(s_stop_bits_active));
+
     board_zg23_reset_gpio_init();
 
 #ifdef CONFIG_UART_AUTO_DOWNLOAD
@@ -509,7 +524,12 @@ void app_main(void)
     xTaskCreate(uart_tx_task, "uart_tx", 4096, NULL, 4, NULL);
 
     vTaskDelay(pdMS_TO_TICKS(500));
-    xTaskCreate(uart_rx_task, "uart_rx", 4096, (void *)usb_tx_handle, 4, NULL);
+
+    uart_rx_task_param_t uart_rx_task_param = {
+        .usb_tx_handle = usb_tx_handle,
+        .uart_queue = uart_queue,
+    };
+    xTaskCreate(uart_rx_task, "uart_rx", 4096, (void *)&uart_rx_task_param, 4, NULL);
 
     ESP_LOGI(TAG, "USB initialization DONE");
 
