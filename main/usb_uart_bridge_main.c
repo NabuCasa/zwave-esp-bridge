@@ -380,15 +380,26 @@ static void uart_rx_task(void *arg)
         if (xQueueReceive(uart_queue, (void *)&event, portMAX_DELAY)) {
             switch (event.type) {
                 case UART_DATA:
-                    const int rx_data_size = uart_read_bytes(BOARD_UART_PORT, data, MIN(UART_RX_BUF_SIZE, event.size), 0);
+                    while (1) {
+                        const int rx_data_size = uart_read_bytes(BOARD_UART_PORT, data, MIN(UART_RX_BUF_SIZE, event.size), 0);
+                        ESP_LOGD(TAG, "uart rx: %d bytes", rx_data_size);
 
-                    if (rx_data_size > 0) {
+                        if (rx_data_size == 0) {
+                            // There's no more data to read
+                            ESP_LOGD(TAG, "uart rx: waking up USB TX task");
+                            xTaskNotifyGive(usb_tx_handle);
+                            break;
+                        }
+
+                        if (rx_data_size < 0) {
+                            ESP_LOGE(TAG, "uart read failed: %d", rx_data_size);
+                            break;
+                        }
+
                         int res = xRingbufferSend(s_usb_tx_ringbuf, data, rx_data_size, 0);
                         if (res != pdTRUE) {
                             ESP_LOGW(TAG, "The unread buffer is too small, the data has been lost");
                         }
-
-                        xTaskNotifyGive(usb_tx_handle);
                     }
 
                     break;
