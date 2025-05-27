@@ -184,7 +184,7 @@ static void tinyusb_cdc_rx_callback(int itf, cdcacm_event_t *event)
     /* read from usb */
     esp_err_t ret = tinyusb_cdcacm_read(itf, rx_buf, USB_RX_BUF_SIZE, &rx_size);
     ESP_LOGD(TAG, "tinyusb_cdc_rx_callback (size: %u)", rx_size);
-    ESP_LOG_BUFFER_HEXDUMP(TAG, rx_buf, rx_size, ESP_LOG_DEBUG);
+    ESP_LOG_BUFFER_HEXDUMP(TAG, rx_buf, rx_size, ESP_LOG_VERBOSE);
 
     if (ret == ESP_OK && rx_size > 0) {
         BaseType_t send_res = xRingbufferSend(s_usb_rx_ringbuf, rx_buf, rx_size, 0);
@@ -338,6 +338,9 @@ static void usb_tx_task(void *arg)
             ESP_LOGE(TAG, "usb tx ringbuf read succeeded with empty read, skipping");
             continue;
         }
+
+        ESP_LOGD(TAG, "read %d bytes from USB TX buffer", tx_data_size);
+        ESP_LOG_BUFFER_HEXDUMP(TAG, data, tx_data_size, ESP_LOG_VERBOSE);
 
         // Serial data will be split up into 64 byte chunks to be sent over USB so this
         // usually will take multiple iterations
@@ -533,8 +536,15 @@ void app_main(void)
     ESP_ERROR_CHECK(tusb_cdc_acm_init(&acm_cfg));
 
     TaskHandle_t usb_tx_handle = NULL;
-    xTaskCreate(usb_tx_task, "usb_tx", 4096, &acm_cfg, 4, &usb_tx_handle);
-    xTaskCreate(uart_tx_task, "uart_tx", 4096, NULL, 4, NULL);
+
+    size_t stack_size = 4096;
+
+    if (esp_log_level_get(TAG) >= ESP_LOG_DEBUG) {
+        stack_size = 8192;  // Increase stack size for debug logging
+    }
+
+    xTaskCreate(usb_tx_task, "usb_tx", stack_size, &acm_cfg, 4, &usb_tx_handle);
+    xTaskCreate(uart_tx_task, "uart_tx", stack_size, NULL, 4, NULL);
 
     vTaskDelay(pdMS_TO_TICKS(500));
 
@@ -542,7 +552,7 @@ void app_main(void)
         .usb_tx_handle = usb_tx_handle,
         .uart_queue = uart_queue,
     };
-    xTaskCreate(uart_rx_task, "uart_rx", 4096, (void *)&uart_rx_task_param, 4, NULL);
+    xTaskCreate(uart_rx_task, "uart_rx", stack_size, (void *)&uart_rx_task_param, 4, NULL);
 
     ESP_LOGI(TAG, "USB initialization DONE");
 
