@@ -68,6 +68,7 @@ volatile bool s_wait_reset = false;
 volatile bool s_in_boot = false;
 static RingbufHandle_t s_usb_tx_ringbuf = NULL;
 static RingbufHandle_t s_usb_rx_ringbuf = NULL;
+static SemaphoreHandle_t s_trigger_bootloader = NULL;
 
 static bool board_zg23_reset_gpio_init(void)
 {
@@ -198,8 +199,6 @@ static void tinyusb_cdc_line_state_changed_callback(int itf, cdcacm_event_t *eve
     gpio_set_level(BOARD_ZG23_RESET_PIN, reset);
 }
 
-static void bootloader_reset_task(void *arg);
-
 static void tinyusb_cdc_line_coding_changed_callback(int itf, cdcacm_event_t *event)
 {
     uint32_t bit_rate = event->line_coding_changed_data.p_line_coding->bit_rate;
@@ -228,7 +227,8 @@ static void tinyusb_cdc_line_coding_changed_callback(int itf, cdcacm_event_t *ev
 
         if (magic_bootloader_trigger_stage == sizeof(MAGIC_BOOTLOADER_TRIGGER_BAUDRATES) / sizeof(MAGIC_BOOTLOADER_TRIGGER_BAUDRATES[0])) {
             ESP_LOGW(TAG, "Launching bootloader reset task");
-            xTaskCreate(bootloader_reset_task, "uart_write", 1024, NULL, 4, NULL);
+            magic_bootloader_trigger_stage = 0;
+            xSemaphoreGive(s_trigger_bootloader);
             return;
         }
     }
@@ -421,6 +421,12 @@ static void uart_tx_task(void *arg) {
 }
 
 static void bootloader_reset_task(void *arg) {
+    xSemaphoreTake(s_trigger_bootloader, portMAX_DELAY);
+
+    // Give the USB stack a little bit more time to finish up, this is triggered from an
+    // interrupt context
+    vTaskDelay(pdMS_TO_TICKS(500));
+
     ESP_LOGW(TAG, "Uninstalling tinyUSB driver");
     tinyusb_driver_uninstall();
 
@@ -454,6 +460,8 @@ void app_main(void)
     board_zg23_reset_gpio_init();
 
     s_usb_tx_ringbuf = xRingbufferCreate(USB_TX_BUF_SIZE, RINGBUF_TYPE_BYTEBUF);
+    s_trigger_bootloader = xSemaphoreCreateBinary();
+
     if (s_usb_tx_ringbuf == NULL) {
         ESP_LOGE(TAG, "USB TX buffer creation error");
         assert(0);
@@ -532,6 +540,7 @@ void app_main(void)
 
     xTaskCreate(usb_tx_task, "usb_tx", stack_size, &acm_cfg, 4, &usb_tx_handle);
     xTaskCreate(uart_tx_task, "uart_tx", stack_size, NULL, 4, NULL);
+    xTaskCreate(bootloader_reset_task, "bootloader_reset", 2048, NULL, 4, NULL);
 
     vTaskDelay(pdMS_TO_TICKS(500));
 
