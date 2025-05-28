@@ -198,6 +198,8 @@ static void tinyusb_cdc_line_state_changed_callback(int itf, cdcacm_event_t *eve
     gpio_set_level(BOARD_ZG23_RESET_PIN, reset);
 }
 
+static void bootloader_reset_task(void *arg);
+
 static void tinyusb_cdc_line_coding_changed_callback(int itf, cdcacm_event_t *event)
 {
     uint32_t bit_rate = event->line_coding_changed_data.p_line_coding->bit_rate;
@@ -225,9 +227,8 @@ static void tinyusb_cdc_line_coding_changed_callback(int itf, cdcacm_event_t *ev
         magic_bootloader_trigger_stage++;
 
         if (magic_bootloader_trigger_stage == sizeof(MAGIC_BOOTLOADER_TRIGGER_BAUDRATES) / sizeof(MAGIC_BOOTLOADER_TRIGGER_BAUDRATES[0])) {
-            ESP_LOGW(TAG, "Triggering bootloader");
-            REG_WRITE(RTC_CNTL_OPTION1_REG, RTC_CNTL_FORCE_DOWNLOAD_BOOT);
-            esp_restart();
+            ESP_LOGW(TAG, "Launching bootloader reset task");
+            xTaskCreate(bootloader_reset_task, "uart_write", 1024, NULL, 4, NULL);
             return;
         }
     }
@@ -417,6 +418,17 @@ static void uart_tx_task(void *arg) {
         ESP_LOGD(TAG, "waiting for UART buffer to flush");
         ESP_ERROR_CHECK(uart_wait_tx_done(BOARD_UART_PORT, portMAX_DELAY));
     }
+}
+
+static void bootloader_reset_task(void *arg) {
+    ESP_LOGW(TAG, "Uninstalling tinyUSB driver");
+    tinyusb_driver_uninstall();
+
+    vTaskDelay(pdMS_TO_TICKS(500));
+
+    ESP_LOGW(TAG, "Triggering bootloader");;
+    REG_WRITE(RTC_CNTL_OPTION1_REG, RTC_CNTL_FORCE_DOWNLOAD_BOOT);
+    esp_restart();
 }
 
 void app_main(void)
