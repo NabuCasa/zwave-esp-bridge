@@ -1,16 +1,5 @@
 menu "USB UART Bridge Example"
 
-    config UART_AUTO_DOWNLOAD
-        bool "Enable auto download, if enable please attach io0 and rst"
-        default n
-    config BOARD_AUTODLD_EN_PIN
-        int "Auto download EN(RST) pin"
-        default 3
-        depends on UART_AUTO_DOWNLOAD
-    config BOARD_AUTODLD_BOOT_PIN
-        int "Auto download BOOT pin"
-        default 26
-        depends on UART_AUTO_DOWNLOAD
     config BOARD_UART_TXD_PIN
         int "UART TXD pin"
         default 14
