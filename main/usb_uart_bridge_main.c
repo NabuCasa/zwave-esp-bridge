@@ -28,6 +28,7 @@ static const char *TAG = "USB2UART";
 #define BOARD_UART_RXD_PIN     CONFIG_BOARD_UART_RXD_PIN
 #define UART_RX_BUF_SIZE       CONFIG_UART_RX_BUF_SIZE
 #define UART_TX_BUF_SIZE       CONFIG_UART_TX_BUF_SIZE
+#define UART_QUEUE_SIZE        16
 
 #define BOARD_ZG23_RESET_PIN   CONFIG_BOARD_ZG23_RESET_PIN
 #define BOARD_ZG23_BTL_PIN     CONFIG_BOARD_ZG23_BTL_PIN
@@ -40,7 +41,6 @@ static bool s_reset_trigger = false;
 
 #define USB_RX_BUF_SIZE CONFIG_USB_RX_BUF_SIZE
 #define USB_TX_BUF_SIZE CONFIG_USB_TX_BUF_SIZE
-#define USB_RX_TO_UART_BUF_SIZE (USB_RX_BUF_SIZE * 4)
 
 #define CFG_BAUD_RATE(b) (b)
 #define CFG_STOP_BITS(s) (((s)==2)?UART_STOP_BITS_2:(((s)==1)?UART_STOP_BITS_1_5:UART_STOP_BITS_1))
@@ -66,25 +66,6 @@ volatile bool s_wait_reset = false;
 volatile bool s_in_boot = false;
 static RingbufHandle_t s_usb_tx_ringbuf = NULL;
 static RingbufHandle_t s_usb_rx_ringbuf = NULL;
-static SemaphoreHandle_t s_usb_tx_requested = NULL;
-static SemaphoreHandle_t s_usb_tx_done = NULL;
-
-static void board_uart_init(void)
-{
-    uart_config_t uart_config = {
-        .baud_rate = CFG_BAUD_RATE(s_baud_rate_active),
-        .data_bits = CFG_DATA_BITS(s_data_bits_active),
-        .parity = CFG_PARITY(s_parity_active),
-        .stop_bits = CFG_STOP_BITS(s_stop_bits_active),
-        .flow_ctrl = UART_HW_FLOWCTRL_DISABLE,
-        .source_clk = UART_SCLK_APB,
-    };
-
-    uart_driver_install(BOARD_UART_PORT, UART_RX_BUF_SIZE, UART_TX_BUF_SIZE, 0, NULL, 0);
-    uart_param_config(BOARD_UART_PORT, &uart_config);
-    uart_set_pin(BOARD_UART_PORT, BOARD_UART_TXD_PIN, BOARD_UART_RXD_PIN, UART_PIN_NO_CHANGE, UART_PIN_NO_CHANGE);
-    ESP_LOGI(TAG, "init UART%d: %"PRIu32 " %s %s %s", BOARD_UART_PORT, s_baud_rate_active, STR_DATA_BITS(s_data_bits_active), STR_PARITY(s_parity_active), STR_STOP_BITS(s_stop_bits_active));
-}
 
 #ifdef CONFIG_UART_AUTO_DOWNLOAD
 static bool board_autodl_gpio_init(void)
@@ -191,22 +172,7 @@ void tud_resume_cb(void)
 
 void tud_cdc_tx_complete_cb(const uint8_t itf)
 {
-    if (xSemaphoreTake(s_usb_tx_requested, 0) != pdTRUE) {
-        /* Semaphore should have been given before write attempt.
-            Sometimes tinyusb can send one more cb even xfer_complete len is zero
-        */
-        return;
-    }
-
-    xSemaphoreGive(s_usb_tx_done);
-}
-
-static esp_err_t _wait_for_usb_tx_done(const uint32_t block_time_ms)
-{
-    if (xSemaphoreTake(s_usb_tx_done, pdMS_TO_TICKS(block_time_ms)) != pdTRUE) {
-        return ESP_ERR_TIMEOUT;
-    }
-    return ESP_OK;
+    ESP_LOGD(TAG, "USB TX completed");
 }
 
 static void tinyusb_cdc_rx_callback(int itf, cdcacm_event_t *event)
@@ -218,7 +184,7 @@ static void tinyusb_cdc_rx_callback(int itf, cdcacm_event_t *event)
     /* read from usb */
     esp_err_t ret = tinyusb_cdcacm_read(itf, rx_buf, USB_RX_BUF_SIZE, &rx_size);
     ESP_LOGD(TAG, "tinyusb_cdc_rx_callback (size: %u)", rx_size);
-    ESP_LOG_BUFFER_HEXDUMP(TAG, rx_buf, rx_size, ESP_LOG_DEBUG);
+    ESP_LOG_BUFFER_HEXDUMP(TAG, rx_buf, rx_size, ESP_LOG_VERBOSE);
 
     if (ret == ESP_OK && rx_size > 0) {
         BaseType_t send_res = xRingbufferSend(s_usb_rx_ringbuf, rx_buf, rx_size, 0);
@@ -317,25 +283,24 @@ static void tinyusb_cdc_line_coding_changed_callback(int itf, cdcacm_event_t *ev
     }
 }
 
-static esp_err_t _usb_tx_ringbuf_read(uint8_t *out_buf, size_t req_bytes, size_t *read_bytes)
+static esp_err_t _ringbuf_read_bytes(RingbufHandle_t ring_buf, uint8_t *out_buf, size_t req_bytes, size_t *read_bytes, TickType_t xTicksToWait)
 {
-    uint8_t *buf = xRingbufferReceiveUpTo(s_usb_tx_ringbuf, read_bytes, 0, req_bytes);
+    uint8_t *buf = xRingbufferReceiveUpTo(ring_buf, read_bytes, xTicksToWait, req_bytes);
 
     if (buf) {
         memcpy(out_buf, buf, *read_bytes);
-        vRingbufferReturnItem(s_usb_tx_ringbuf, (void *)(buf));
+        vRingbufferReturnItem(ring_buf, (void *)(buf));
         return ESP_OK;
     } else {
         return ESP_FAIL;
     }
 }
 
-static esp_err_t usb_tx_ringbuf_read(uint8_t *out_buf, size_t out_buf_sz, size_t *rx_data_size)
+static esp_err_t ringbuf_read_bytes(RingbufHandle_t ring_buf, uint8_t *out_buf, size_t out_buf_sz, size_t *rx_data_size, TickType_t xTicksToWait)
 {
-
     size_t read_sz;
 
-    esp_err_t res = _usb_tx_ringbuf_read(out_buf, out_buf_sz, &read_sz);
+    esp_err_t res = _ringbuf_read_bytes(ring_buf, out_buf, out_buf_sz, &read_sz, xTicksToWait);
 
     if (res != ESP_OK) {
         return res;
@@ -344,7 +309,7 @@ static esp_err_t usb_tx_ringbuf_read(uint8_t *out_buf, size_t out_buf_sz, size_t
     *rx_data_size = read_sz;
 
     /* Buffer's data can be wrapped, at that situations we should make another retrievement */
-    if (_usb_tx_ringbuf_read(out_buf + read_sz, out_buf_sz - read_sz, &read_sz) == ESP_OK) {
+    if (_ringbuf_read_bytes(ring_buf, out_buf + read_sz, out_buf_sz - read_sz, &read_sz, 0) == ESP_OK) {
         *rx_data_size += read_sz;
     }
 
@@ -353,88 +318,161 @@ static esp_err_t usb_tx_ringbuf_read(uint8_t *out_buf, size_t out_buf_sz, size_t
 
 static void usb_tx_task(void *arg)
 {
+    tinyusb_config_cdcacm_t *acm_cfg = (tinyusb_config_cdcacm_t *)arg;
+    tinyusb_cdcacm_itf_t itf = acm_cfg->cdc_port;
+
     uint8_t data[USB_TX_BUF_SIZE] = {0};
-    size_t rx_data_size = 0;
+    size_t tx_data_size = 0;
+
     while (1) {
-        esp_err_t ret = usb_tx_ringbuf_read(data, USB_TX_BUF_SIZE, &rx_data_size);
-        if (ESP_OK == ret && rx_data_size != 0) {
-            xSemaphoreGive(s_usb_tx_requested);
-            size_t ret = tinyusb_cdcacm_write_queue(0, data, rx_data_size);
-            ESP_LOGV(TAG, "usb tx data size = %d ret=%u", rx_data_size, ret);
-            tud_cdc_n_write_flush(0);
-            //We wait for 10 times of the time it takes to send the data
-            uint32_t timeout_ms = 10 * (rx_data_size / 64 / 19 + 1);
-            if (_wait_for_usb_tx_done(timeout_ms) != ESP_OK) {
-                xSemaphoreTake(s_usb_tx_requested, 0);
-                ESP_LOGD(TAG, "usb tx timeout");
-                // We do not want to buffer a bunch of data while the host
-                // is not connected, so clear it all
-                tud_cdc_n_write_clear(0);
+        // Wait for a notification from the UART read task
+        ulTaskNotifyTake(pdTRUE, portMAX_DELAY);
+
+        // When we do wake up, we can be sure there is data in the ring buffer
+        esp_err_t ret = ringbuf_read_bytes(s_usb_tx_ringbuf, data, USB_TX_BUF_SIZE, &tx_data_size, 0);
+
+        if (ret != ESP_OK) {
+            ESP_LOGE(TAG, "usb tx ringbuf read failed");
+            continue;
+        } else if (tx_data_size == 0) {
+            ESP_LOGE(TAG, "usb tx ringbuf read succeeded with empty read, skipping");
+            continue;
+        }
+
+        ESP_LOGD(TAG, "read %d bytes from USB TX buffer", tx_data_size);
+        ESP_LOG_BUFFER_HEXDUMP(TAG, data, tx_data_size, ESP_LOG_VERBOSE);
+
+        // Serial data will be split up into 64 byte chunks to be sent over USB so this
+        // usually will take multiple iterations
+        uint8_t *data_head = &data[0];
+
+        while (tx_data_size > 0) {
+            size_t queued = tinyusb_cdcacm_write_queue(itf, data_head, tx_data_size);
+            ESP_LOGV(TAG, "usb tx enqueued: size=%d, queued=%u", tx_data_size, queued);
+
+            tx_data_size -= queued;
+            data_head += queued;
+
+            ESP_LOGV(TAG, "usb tx: waiting 10ms for flush");
+            esp_err_t flush_ret = tinyusb_cdcacm_write_flush(itf, pdMS_TO_TICKS(10));
+
+            if (flush_ret != ESP_OK) {
+                ESP_LOGE(TAG, "usb tx flush failed");
+                tud_cdc_n_write_clear(itf);
+                break;
             }
-        } else {
-            ulTaskNotifyTake(pdTRUE, 1);
         }
     }
 }
 
-static void uart_read_task(void *arg)
+typedef struct uart_rx_task_param_t {
+    TaskHandle_t usb_tx_handle;
+    QueueHandle_t uart_queue;
+} uart_rx_task_param_t;
+
+
+static void uart_rx_task(void *arg)
 {
-    TaskHandle_t usb_tx_handle = (TaskHandle_t)arg;
+    TaskHandle_t usb_tx_handle = ((uart_rx_task_param_t*)arg)->usb_tx_handle;
+    QueueHandle_t uart_queue = ((uart_rx_task_param_t*)arg)->uart_queue;
+
     uint8_t data[UART_RX_BUF_SIZE] = {0};
+    uart_event_t event;
 
     while (1) {
-        const int rxBytes = uart_read_bytes(BOARD_UART_PORT, data, UART_RX_BUF_SIZE, 1);
-        if (rxBytes > 0) {
-            int res = xRingbufferSend(s_usb_tx_ringbuf, data, rxBytes, 0);
-            if (res != pdTRUE) {
-                ESP_LOGW(TAG, "The unread buffer is too small, the data has been lost");
-            }
-            xTaskNotifyGive(usb_tx_handle);
+        if (!xQueueReceive(uart_queue, (void *)&event, portMAX_DELAY)) {
+            continue;
+        }
+
+        switch (event.type) {
+            case UART_DATA:
+                while (1) {
+                    const int rx_data_size = uart_read_bytes(BOARD_UART_PORT, data, MIN(UART_RX_BUF_SIZE, event.size), 0);
+                    ESP_LOGD(TAG, "uart rx: %d bytes", rx_data_size);
+
+                    if (rx_data_size == 0) {
+                        // There's no more data to read
+                        ESP_LOGD(TAG, "uart rx: waking up USB TX task");
+                        xTaskNotifyGive(usb_tx_handle);
+                        break;
+                    }
+
+                    if (rx_data_size < 0) {
+                        ESP_LOGE(TAG, "uart read failed: %d", rx_data_size);
+                        break;
+                    }
+
+                    int res = xRingbufferSend(s_usb_tx_ringbuf, data, rx_data_size, 0);
+                    if (res != pdTRUE) {
+                        ESP_LOGW(TAG, "The unread buffer is too small, the data has been lost");
+                    }
+                }
+
+                break;
+
+            default:
+                ESP_LOGI(TAG, "uart event type: %d", event.type);
+                break;
         }
     }
 }
 
-static void uart_writer_task(void *arg) {
+static void uart_tx_task(void *arg) {
     uint8_t data_to_uart[CONFIG_USB_RX_BUF_SIZE];
     size_t rx_size;
 
     while (1) {
-        uint8_t *rx_buf = (uint8_t *)xRingbufferReceiveUpTo(s_usb_rx_ringbuf, &rx_size, pdMS_TO_TICKS(portMAX_DELAY), sizeof(data_to_uart));
+        ESP_LOGD(TAG, "waiting for data to send to uart");
+        esp_err_t ret = ringbuf_read_bytes(s_usb_rx_ringbuf, data_to_uart, sizeof(data_to_uart), &rx_size, portMAX_DELAY);
 
-        if (!rx_buf || rx_size == 0) {
+        if (ret != ESP_OK) {
+            ESP_LOGE(TAG, "usb rx ringbuf read failed");
             continue;
         }
 
-        size_t xfer_size = uart_write_bytes(BOARD_UART_PORT, rx_buf, rx_size);
+        size_t xfer_size = uart_write_bytes(BOARD_UART_PORT, data_to_uart, rx_size);
+
         if (xfer_size != rx_size) {
             ESP_LOGD(TAG, "uart write lost (%d/%d)", xfer_size, rx_size);
         }
-        ESP_LOGD(TAG, "uart write data (%d bytes): %s", rx_size, rx_buf);
 
-        vRingbufferReturnItem(s_usb_rx_ringbuf, (void *)rx_buf);
+        ESP_LOGD(TAG, "waiting for UART buffer to flush");
+        ESP_ERROR_CHECK(uart_wait_tx_done(BOARD_UART_PORT, portMAX_DELAY));
     }
 }
 
 void app_main(void)
 {
     // Only for debugging - do not leave uncommented in production:
-    // esp_log_level_set(TAG, ESP_LOG_VERBOSE);
+    //esp_log_level_set("*", ESP_LOG_VERBOSE);
 
-    board_uart_init();
+    uart_config_t uart_config = {
+        .baud_rate = CFG_BAUD_RATE(s_baud_rate_active),
+        .data_bits = CFG_DATA_BITS(s_data_bits_active),
+        .parity = CFG_PARITY(s_parity_active),
+        .stop_bits = CFG_STOP_BITS(s_stop_bits_active),
+        .flow_ctrl = UART_HW_FLOWCTRL_DISABLE,
+        .source_clk = UART_SCLK_APB,
+    };
+
+    QueueHandle_t uart_queue = NULL;
+    uart_driver_install(BOARD_UART_PORT, UART_RX_BUF_SIZE, UART_TX_BUF_SIZE, UART_QUEUE_SIZE, &uart_queue, 0);
+    uart_param_config(BOARD_UART_PORT, &uart_config);
+    uart_set_pin(BOARD_UART_PORT, BOARD_UART_TXD_PIN, BOARD_UART_RXD_PIN, UART_PIN_NO_CHANGE, UART_PIN_NO_CHANGE);
+    ESP_LOGI(TAG, "init UART%d: %"PRIu32 " %s %s %s", BOARD_UART_PORT, s_baud_rate_active, STR_DATA_BITS(s_data_bits_active), STR_PARITY(s_parity_active), STR_STOP_BITS(s_stop_bits_active));
+
     board_zg23_reset_gpio_init();
 
 #ifdef CONFIG_UART_AUTO_DOWNLOAD
     board_autodl_gpio_init();
 #endif
     s_usb_tx_ringbuf = xRingbufferCreate(USB_TX_BUF_SIZE, RINGBUF_TYPE_BYTEBUF);
-    s_usb_tx_done = xSemaphoreCreateBinary();
-    s_usb_tx_requested = xSemaphoreCreateBinary();
     if (s_usb_tx_ringbuf == NULL) {
         ESP_LOGE(TAG, "USB TX buffer creation error");
         assert(0);
     }
 
-    s_usb_rx_ringbuf = xRingbufferCreate(USB_RX_TO_UART_BUF_SIZE, RINGBUF_TYPE_BYTEBUF);
+    s_usb_rx_ringbuf = xRingbufferCreate(UART_TX_BUF_SIZE, RINGBUF_TYPE_BYTEBUF);
     if (s_usb_rx_ringbuf == NULL) {
         ESP_LOGE(TAG, "USB RX buffer creation error");
         assert(0);
@@ -485,7 +523,7 @@ void app_main(void)
 
     ESP_ERROR_CHECK(tinyusb_driver_install(&tusb_cfg));
 
-    tinyusb_config_cdcacm_t amc_cfg = {
+    tinyusb_config_cdcacm_t acm_cfg = {
         .usb_dev = TINYUSB_USBDEV_0,
         .cdc_port = TINYUSB_CDC_ACM_0,
         .rx_unread_buf_sz = USB_RX_BUF_SIZE,
@@ -495,13 +533,26 @@ void app_main(void)
         .callback_line_coding_changed = &tinyusb_cdc_line_coding_changed_callback
     };
 
-    ESP_ERROR_CHECK(tusb_cdc_acm_init(&amc_cfg));
+    ESP_ERROR_CHECK(tusb_cdc_acm_init(&acm_cfg));
 
     TaskHandle_t usb_tx_handle = NULL;
-    xTaskCreate(usb_tx_task, "usb_tx", 4096, NULL, 4, &usb_tx_handle);
-    xTaskCreate(uart_writer_task, "uart_write", 4096, NULL, 4, NULL);
+
+    size_t stack_size = 4096;
+
+    if (esp_log_level_get(TAG) >= ESP_LOG_DEBUG) {
+        stack_size = 8192;  // Increase stack size for debug logging
+    }
+
+    xTaskCreate(usb_tx_task, "usb_tx", stack_size, &acm_cfg, 4, &usb_tx_handle);
+    xTaskCreate(uart_tx_task, "uart_tx", stack_size, NULL, 4, NULL);
+
     vTaskDelay(pdMS_TO_TICKS(500));
-    xTaskCreate(uart_read_task, "uart_rx", 4096, (void *)usb_tx_handle, 4, NULL);
+
+    uart_rx_task_param_t uart_rx_task_param = {
+        .usb_tx_handle = usb_tx_handle,
+        .uart_queue = uart_queue,
+    };
+    xTaskCreate(uart_rx_task, "uart_rx", stack_size, (void *)&uart_rx_task_param, 4, NULL);
 
     ESP_LOGI(TAG, "USB initialization DONE");
 
