@@ -70,7 +70,7 @@ The example using `ESP32-S3-OTG` board by default, the IO configuration is as fo
 4. Build, Flash, output log
 
     ```bash
-    idf.py build flash monitor
+    SDKCONFIG_DEFAULTS=sdkconfig.defaults-zwa2 idf.py build flash monitor
     ```
 
 ### Automatic Firmware Download with esptool
