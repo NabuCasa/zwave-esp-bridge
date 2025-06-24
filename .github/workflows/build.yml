@@ -1,4 +1,4 @@
-name: "Build firmware"
+name: "Build firmwares"
 
 # Run this job on all pushes to master, for pull requests
 # as well as tags with a semantic version
@@ -22,6 +22,14 @@ concurrency:
 jobs:
   build:
     runs-on: ubuntu-latest
+    
+    strategy:
+      matrix:
+        include:
+          - id: zwa2
+            sdkconfig_defaults: "sdkconfig.defaults-zwa2"
+          - id: zbt2
+            sdkconfig_defaults: "sdkconfig.defaults-zbt2"
 
     steps:
     - name: Checkout repo
@@ -36,7 +44,7 @@ jobs:
         target: esp32s3
         path: '.'
         command: |
-          idf.py build \
+          SDKCONFIG_DEFAULTS=${{ matrix.sdkconfig_defaults }} idf.py build \
           && cd build \
           && esptool.py \
             --chip esp32s3 merge_bin \
@@ -55,11 +63,11 @@ jobs:
     - name: Upload
       uses: actions/upload-artifact@v4
       with:
-        name: usb2uart.bin
+        name: ${{ matrix.id }}_usb2uart.bin
         path: build/usb2uart.bin
 
     - name: Upload
       uses: actions/upload-artifact@v4
       with:
-        name: usb2uart_factory.bin
+        name: ${{ matrix.id }}_usb2uart_factory.bin
         path: build/usb2uart_factory.bin
