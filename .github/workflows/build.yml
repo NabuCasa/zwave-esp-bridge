@@ -26,8 +26,8 @@ jobs:
     strategy:
       matrix:
         include:
-          - id: zwa1
-            sdkconfig_defaults: "sdkconfig.defaults-zwa1"
+          - id: zwa2
+            sdkconfig_defaults: "sdkconfig.defaults-zwa2"
           - id: zbt2
             sdkconfig_defaults: "sdkconfig.defaults-zbt2"
 
