@@ -37,6 +37,10 @@ jobs:
     - name: Create output directory
       run: mkdir -p output
 
+    - name: Write version
+      if: github.event_name == 'release'
+      run: echo "${{ github.event.release.tag_name }}" > version.txt
+
     - name: ESP-IDF build
       uses: espressif/esp-idf-ci-action@v1
       with:
