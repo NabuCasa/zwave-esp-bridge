@@ -7,29 +7,26 @@ on:
     branches:
       # This avoids having duplicate builds in non-forked PRs
       - "master"
-    tags:
-      # normal versions
-      - "v[0-9]+.[0-9]+.[0-9]+"
-      # pre-releases
-      - "v[0-9]+.[0-9]+.[0-9]+-**"
+  release:
+    types:
+      - published
   pull_request: {}
 
 # Cancel previous PR/branch runs when a new commit is pushed
 concurrency:
   group: 'build-firmware-${{ github.ref }}'
   cancel-in-progress: true
-  
+
 jobs:
   build:
+    name: ${{ matrix.device }}
     runs-on: ubuntu-latest
-    
     strategy:
+      fail-fast: false
       matrix:
-        include:
-          - id: zwa2
-            sdkconfig_defaults: "sdkconfig.defaults-zwa2"
-          - id: zbt2
-            sdkconfig_defaults: "sdkconfig.defaults-zbt2"
+        device:
+          - zwa2
+          - zbt2
 
     steps:
     - name: Checkout repo
@@ -37,37 +34,55 @@ jobs:
       with:
         submodules: 'recursive'
 
-    - name: esp-idf build
+    - name: Create output directory
+      run: mkdir -p output
+
+    - name: Write version
+      if: github.event_name == 'release'
+      run: echo "${{ github.event.release.tag_name }}" > version.txt
+
+    - name: ESP-IDF build
       uses: espressif/esp-idf-ci-action@v1
       with:
         esp_idf_version: v5.4
         target: esp32s3
-        path: '.'
+        extra_docker_args: -e SDKCONFIG_DEFAULTS=sdkconfig.defaults-${{ matrix.device }}
+
+    - name: Create factory bin
+      uses: espressif/esp-idf-ci-action@v1
+      with:
+        esp_idf_version: v5.4
+        target: esp32s3
+        path: build
         command: |
-          SDKCONFIG_DEFAULTS=${{ matrix.sdkconfig_defaults }} idf.py build \
-          && cd build \
-          && esptool.py \
-            --chip esp32s3 merge_bin \
-            -o usb2uart_factory.bin \
-            --flash_mode dio \
-            --flash_size 2MB \
-            0x0 bootloader/bootloader.bin \
-            0x10000 usb2uart.bin \
-            0x8000 partition_table/partition-table.bin
+          esptool.py \
+            --chip esp32s3 \
+            merge_bin \
+            -o ../output/${{ matrix.device }}-esp-bridge.factory.bin \
+            @flash_args
 
-    - name: Debug
+    - name: Copy app bin
+      working-directory: build
+      run: cp usb2uart.bin ../output/${{ matrix.device }}-esp-bridge.bin
+
+    - name: MD5
+      working-directory: output
       run: |
-        echo "Listing build directory"
-        ls -la build
+        md5sum ${{ matrix.device }}-esp-bridge.bin > ${{ matrix.device }}-esp-bridge.bin.md5
+        md5sum ${{ matrix.device }}-esp-bridge.factory.bin > ${{ matrix.device }}-esp-bridge.factory.bin.md5
 
-    - name: Upload
+    - name: Upload artifacts
       uses: actions/upload-artifact@v4
       with:
-        name: ${{ matrix.id }}_usb2uart.bin
-        path: build/usb2uart.bin
+        name: ${{ matrix.device }}
+        path: output/
 
-    - name: Upload
-      uses: actions/upload-artifact@v4
+    - name: Upload to release
+      if: github.event_name == 'release'
+      uses: softprops/action-gh-release@v2
       with:
-        name: ${{ matrix.id }}_usb2uart_factory.bin
-        path: build/usb2uart_factory.bin
+        files: |
+          output/${{ matrix.device }}-esp-bridge.bin
+          output/${{ matrix.device }}-esp-bridge.bin.md5
+          output/${{ matrix.device }}-esp-bridge.factory.bin
+          output/${{ matrix.device }}-esp-bridge.factory.bin.md5
