@@ -43,7 +43,7 @@ jobs:
         if [ -z "${{ github.event.release.tag_name }}" ]; then
           DATE=$(date +%Y%m%d)
           COMMIT=$(git rev-parse --short ${{ github.sha }})
-          VERSION="$DATE_$COMMIT"
+          VERSION="${DATE}_${COMMIT}"
         else
           VERSION="${{ github.event.release.tag_name }}"
         fi
