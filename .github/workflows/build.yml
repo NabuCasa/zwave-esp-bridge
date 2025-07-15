@@ -38,16 +38,13 @@ jobs:
 
     - name: ESP-IDF build
       uses: espressif/esp-idf-ci-action@v1
-      env:
-        SDKCONFIG_DEFAULTS: sdkconfig.defaults-${{ matrix.device }}
       with:
         esp_idf_version: v5.4
         target: esp32s3
+        extra_docker_args: -e SDKCONFIG_DEFAULTS=sdkconfig.defaults-${{ matrix.device }}
 
     - name: Create factory bin
       uses: espressif/esp-idf-ci-action@v1
-      env:
-        SDKCONFIG_DEFAULTS: sdkconfig.defaults-${{ matrix.device }}
       with:
         esp_idf_version: v5.4
         target: esp32s3
