@@ -89,7 +89,7 @@ jobs:
     - name: Upload artifacts
       uses: actions/upload-artifact@v4
       with:
-        name: ${{ matrix.device }}
+        name: ${{ matrix.device }}-esp-bridge-${{ steps.version.outputs.version }}
         path: output/
 
     - name: Upload to release
