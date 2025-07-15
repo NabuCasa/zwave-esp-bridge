@@ -22,6 +22,7 @@ jobs:
     name: ${{ matrix.device }}
     runs-on: ubuntu-latest
     strategy:
+      fail-fast: false
       matrix:
         device:
           - zwa2
