@@ -96,8 +96,4 @@ jobs:
       if: github.event_name == 'release'
       uses: softprops/action-gh-release@v2
       with:
-        files: |
-          output/${{ matrix.device }}-esp-bridge.${{ steps.version.outputs.version }}.bin
-          output/${{ matrix.device }}-esp-bridge.${{ steps.version.outputs.version }}.bin.md5
-          output/${{ matrix.device }}-esp-bridge.${{ steps.version.outputs.version }}.factory.bin
-          output/${{ matrix.device }}-esp-bridge.${{ steps.version.outputs.version }}.factory.bin.md5
+        files: output/*
