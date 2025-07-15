@@ -81,8 +81,8 @@ jobs:
     - name: MD5
       working-directory: output
       run: |
-        md5sum ${{ matrix.device }}-esp-bridge.${{ steps.version.outputs.version }}.bin > ${{ matrix.device }}-esp-bridge.${{ steps.version.outputs.version }}.bin.md5
-        md5sum ${{ matrix.device }}-esp-bridge.${{ steps.version.outputs.version }}.factory.bin > ${{ matrix.device }}-esp-bridge.${{ steps.version.outputs.version }}.factory.bin.md5
+        md5sum ${{ matrix.device }}-esp-bridge.${{ steps.version.outputs.version }}.bin | head -c 32 > ${{ matrix.device }}-esp-bridge.${{ steps.version.outputs.version }}.bin.md5
+        md5sum ${{ matrix.device }}-esp-bridge.${{ steps.version.outputs.version }}.factory.bin | head -c 32 > ${{ matrix.device }}-esp-bridge.${{ steps.version.outputs.version }}.factory.bin.md5
 
     - name: Upload artifacts
       uses: actions/upload-artifact@v4
