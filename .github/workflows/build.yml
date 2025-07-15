@@ -52,6 +52,7 @@ jobs:
         path: build
         command: |
           esptool.py \
+            --chip esp32s3 \
             merge_bin \
             -o ../output/${{ matrix.device }}-esp-bridge.factory.bin \
             @flash_args
