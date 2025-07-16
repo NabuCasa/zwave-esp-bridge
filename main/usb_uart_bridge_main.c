@@ -485,12 +485,27 @@ void app_main(void)
     const char *string_descriptor[] = {
         // array of pointer to string descriptors
         (char[]){0x09, 0x04},                    // 0: is supported language is English (0x0409)
-        CONFIG_TINYUSB_DESC_MANUFACTURER_STRING, // 1: Manufacturer
-        CONFIG_TINYUSB_DESC_PRODUCT_STRING,      // 2: Product
+        // 1: Manufacturer
+        #ifdef ADAPTER_USB_MANUFACTURER_OVERRIDE
+            ADAPTER_USB_MANUFACTURER_OVERRIDE,
+        #else
+            CONFIG_TINYUSB_DESC_MANUFACTURER_STRING,
+        #endif
+        // 2: Product
+        #ifdef ADAPTER_USB_PRODUCT_OVERRIDE
+            ADAPTER_USB_PRODUCT_OVERRIDE,
+        #else
+            CONFIG_TINYUSB_DESC_PRODUCT_STRING,
+        #endif
         serial_str,                              // 3: Serials, should use chip ID
 
     #if CONFIG_TINYUSB_CDC_ENABLED
-        CONFIG_TINYUSB_DESC_CDC_STRING,          // 4: CDC Interface
+        // 4: CDC Interface
+        #ifdef ADAPTER_USB_CDC_STRING_OVERRIDE
+            ADAPTER_USB_CDC_STRING_OVERRIDE,
+        #else
+            CONFIG_TINYUSB_DESC_CDC_STRING,
+        #endif
     #else
         "",
     #endif

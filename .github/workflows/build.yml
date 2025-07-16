@@ -24,9 +24,10 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        device:
-          - zwa2
-          - zbt2
+        include:
+          - device: zwa2
+            manufacturer: "Nabu Casa"
+            product: "ZWA-2"
 
     steps:
     - name: Checkout repo
@@ -59,7 +60,9 @@ jobs:
       with:
         esp_idf_version: v5.4
         target: esp32s3
-        extra_docker_args: -e SDKCONFIG_DEFAULTS=sdkconfig.defaults-${{ matrix.device }}
+        command: |
+          idf.py build -D ADAPTER_USB_MANUFACTURER_OVERRIDE="${{ matrix.manufacturer }}" \
+                       -D ADAPTER_USB_PRODUCT_OVERRIDE="${{ matrix.product }}"
 
     - name: Create factory bin
       uses: espressif/esp-idf-ci-action@v1
