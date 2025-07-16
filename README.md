@@ -70,7 +70,7 @@ The example using `ESP32-S3-OTG` board by default, the IO configuration is as fo
 4. Build, Flash, output log
 
     ```bash
-    SDKCONFIG_DEFAULTS=sdkconfig.defaults-zwa2 idf.py build flash monitor
+    idf.py build flash monitor -D ADAPTER_USB_MANUFACTURER_OVERRIDE="Nabu Casa" -D ADAPTER_USB_PRODUCT_OVERRIDE="ZWA-2"
     ```
 
 ### Automatic Firmware Download with esptool
