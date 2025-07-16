@@ -37,9 +37,22 @@ jobs:
     - name: Create output directory
       run: mkdir -p output
 
-    - name: Write version
-      if: github.event_name == 'release'
-      run: echo "${{ github.event.release.tag_name }}" > version.txt
+    - name: Get version
+      id: version
+      run: |
+        if [ -z "${{ github.event.release.tag_name }}" ]; then
+          DATE=$(date +%Y%m%d)
+          COMMIT=$(git rev-parse --short ${{ github.sha }})
+          VERSION="${DATE}_${COMMIT}"
+        else
+          VERSION="${{ github.event.release.tag_name }}"
+        fi
+        echo "version=$VERSION" >> $GITHUB_OUTPUT
+
+    - name: Write version.txt
+      run: |
+        echo "Building version ${{ steps.version.outputs.version }}"
+        echo "${{ steps.version.outputs.version }}" > version.txt
 
     - name: ESP-IDF build
       uses: espressif/esp-idf-ci-action@v1
@@ -58,31 +71,29 @@ jobs:
           esptool.py \
             --chip esp32s3 \
             merge_bin \
-            -o ../output/${{ matrix.device }}-esp-bridge.factory.bin \
+            -o ../output/${{ matrix.device }}-esp-bridge.${{ steps.version.outputs.version }}.factory.bin \
             @flash_args
 
     - name: Copy app bin
       working-directory: build
-      run: cp usb2uart.bin ../output/${{ matrix.device }}-esp-bridge.bin
+      run: cp usb2uart.bin ../output/${{ matrix.device }}-esp-bridge.${{ steps.version.outputs.version }}.bin
 
-    - name: MD5
+    - name: Checksums
       working-directory: output
       run: |
-        md5sum ${{ matrix.device }}-esp-bridge.bin > ${{ matrix.device }}-esp-bridge.bin.md5
-        md5sum ${{ matrix.device }}-esp-bridge.factory.bin > ${{ matrix.device }}-esp-bridge.factory.bin.md5
+        md5sum ${{ matrix.device }}-esp-bridge.${{ steps.version.outputs.version }}.bin | cut -d ' ' -f 1 > ${{ matrix.device }}-esp-bridge.${{ steps.version.outputs.version }}.bin.md5
+        md5sum ${{ matrix.device }}-esp-bridge.${{ steps.version.outputs.version }}.factory.bin | cut -d ' ' -f 1 > ${{ matrix.device }}-esp-bridge.${{ steps.version.outputs.version }}.factory.bin.md5
+        sha256sum ${{ matrix.device }}-esp-bridge.${{ steps.version.outputs.version }}.bin | cut -d ' ' -f 1 > ${{ matrix.device }}-esp-bridge.${{ steps.version.outputs.version }}.bin.sha256
+        sha256sum ${{ matrix.device }}-esp-bridge.${{ steps.version.outputs.version }}.factory.bin | cut -d ' ' -f 1 > ${{ matrix.device }}-esp-bridge.${{ steps.version.outputs.version }}.factory.bin.sha256
 
     - name: Upload artifacts
       uses: actions/upload-artifact@v4
       with:
-        name: ${{ matrix.device }}
+        name: ${{ matrix.device }}-esp-bridge-${{ steps.version.outputs.version }}
         path: output/
 
     - name: Upload to release
       if: github.event_name == 'release'
       uses: softprops/action-gh-release@v2
       with:
-        files: |
-          output/${{ matrix.device }}-esp-bridge.bin
-          output/${{ matrix.device }}-esp-bridge.bin.md5
-          output/${{ matrix.device }}-esp-bridge.factory.bin
-          output/${{ matrix.device }}-esp-bridge.factory.bin.md5
+        files: output/*
