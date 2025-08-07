@@ -34,6 +34,8 @@ const uint64_t MAGIC_BOOTLOADER_TRIGGER_TIMEOUT_MICROS = 5000000;
 #define BOARD_UART_PORT        UART_NUM_1
 #define BOARD_UART_TXD_PIN     CONFIG_BOARD_UART_TXD_PIN
 #define BOARD_UART_RXD_PIN     CONFIG_BOARD_UART_RXD_PIN
+#define BOARD_UART_RTS_PIN     CONFIG_BOARD_UART_RTS_PIN
+#define BOARD_UART_CTS_PIN     CONFIG_BOARD_UART_CTS_PIN
 #define UART_RX_BUF_SIZE       CONFIG_UART_RX_BUF_SIZE
 #define UART_TX_BUF_SIZE       CONFIG_UART_TX_BUF_SIZE
 #define UART_QUEUE_SIZE        16
@@ -447,14 +449,24 @@ void app_main(void)
         .data_bits = CFG_DATA_BITS(s_data_bits_active),
         .parity = CFG_PARITY(s_parity_active),
         .stop_bits = CFG_STOP_BITS(s_stop_bits_active),
-        .flow_ctrl = UART_HW_FLOWCTRL_DISABLE,
+        #if BOARD_UART_RTS_PIN < 0 || BOARD_UART_CTS_PIN < 0
+            .flow_ctrl = UART_HW_FLOWCTRL_DISABLE,
+        #else
+            .flow_ctrl = UART_HW_FLOWCTRL_CTS_RTS,
+        #endif
         .source_clk = UART_SCLK_APB,
     };
 
     QueueHandle_t uart_queue = NULL;
     uart_driver_install(BOARD_UART_PORT, UART_RX_BUF_SIZE, UART_TX_BUF_SIZE, UART_QUEUE_SIZE, &uart_queue, 0);
     uart_param_config(BOARD_UART_PORT, &uart_config);
-    uart_set_pin(BOARD_UART_PORT, BOARD_UART_TXD_PIN, BOARD_UART_RXD_PIN, UART_PIN_NO_CHANGE, UART_PIN_NO_CHANGE);
+    uart_set_pin(
+        BOARD_UART_PORT,
+        BOARD_UART_TXD_PIN,
+        BOARD_UART_RXD_PIN,
+        BOARD_UART_RTS_PIN,
+        BOARD_UART_CTS_PIN
+    );
     ESP_LOGI(TAG, "init UART%d: %"PRIu32 " %s %s %s", BOARD_UART_PORT, s_baud_rate_active, STR_DATA_BITS(s_data_bits_active), STR_PARITY(s_parity_active), STR_STOP_BITS(s_stop_bits_active));
 
     board_zg23_reset_gpio_init();

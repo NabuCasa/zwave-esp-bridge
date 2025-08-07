@@ -6,6 +6,12 @@ menu "USB UART Bridge Example"
     config BOARD_UART_RXD_PIN
         int "UART RXD pin"
         default 13
+    config BOARD_UART_RTS_PIN
+        int "UART RTS pin"
+        default -1
+    config BOARD_UART_CTS_PIN
+        int "UART CTS pin"
+        default -1
     config BOARD_ZG23_RESET_PIN
         int "ZG23 RESET pin"
         default 4
