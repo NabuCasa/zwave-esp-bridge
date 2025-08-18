@@ -85,6 +85,7 @@ The example using `ESP32-S3-OTG` board by default, the IO configuration is as fo
 ESP USB Bridge (USB to UART & JTAG bridge implementation for ESP-IDF by Espressif):
 * https://github.com/espressif/esp-usb-bridge
   * https://github.com/espressif/esp-usb-bridge#readme
+    * https://github.com/espressif/esp-dev-kits/blob/master/docs/en/esp32-s3-usb-bridge/user_guide.rst
 
 Wireless USB UART Bridge (ESP32-S3-USB-Bridge) example :
 * https://github.com/espressif/esp-dev-kits/tree/master/examples/esp32-s3-usb-bridge/examples/usb_wireless_bridge
