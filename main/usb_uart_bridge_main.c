@@ -63,6 +63,7 @@ static uint32_t s_baud_rate_active = 115200;
 static uint8_t s_stop_bits_active = 0;
 static uint8_t s_parity_active = 0;
 static uint8_t s_data_bits_active = 8;
+static bool s_cmd_mode_enabled = false;
 volatile bool s_reset_to_flash = false;
 volatile bool s_wait_reset = false;
 volatile bool s_in_boot = false;
@@ -165,6 +166,57 @@ static void tinyusb_cdc_rx_callback(int itf, cdcacm_event_t *event)
     ESP_LOG_BUFFER_HEXDUMP(TAG, rx_buf, rx_size, ESP_LOG_VERBOSE);
 
     if (ret == ESP_OK && rx_size > 0) {
+        if (s_cmd_mode_enabled) {
+            switch (rx_buf[0]) {
+                case 'B':
+                case 'b':
+                    if (rx_buf[1] == 'e' || rx_buf[1] == 'E') {
+                        // Trigger bootloader
+                        ESP_LOGW(TAG, "Invoking ESP32-S3 bootloader");
+                        xSemaphoreGive(s_trigger_bootloader);
+                    } else if (rx_buf[1] == 'z' || rx_buf[1] == 'Z') {
+                        // Trigger ZG23 bootloader
+                        ESP_LOGW(TAG, "Invoking ZG23 bootloader");
+                        gpio_set_level(BOARD_ZG23_BTL_PIN, false);
+                        gpio_set_level(BOARD_ZG23_RESET_PIN, false);
+                        vTaskDelay(pdMS_TO_TICKS(50));
+                        gpio_set_level(BOARD_ZG23_BTL_PIN, false);
+                        gpio_set_level(BOARD_ZG23_RESET_PIN, true);
+                        vTaskDelay(pdMS_TO_TICKS(50));
+                        gpio_set_level(BOARD_ZG23_BTL_PIN, true);
+                    } else {
+                        ESP_LOGW(TAG, "Unknown command: %c%c", rx_buf[0], rx_buf[1]);
+                    }
+                    break;
+                case 'R':
+                case 'r':
+                    if (rx_buf[1] == 'e' || rx_buf[1] == 'E') {
+                        // Reboot ESP32-S3
+                        ESP_LOGW(TAG, "Rebooting ESP32-S3");
+                        esp_restart();
+                    } else if (rx_buf[1] == 'z' || rx_buf[1] == 'Z') {
+                        // Reboot ZG23
+                        ESP_LOGW(TAG, "Rebooting ZG23");
+                        gpio_set_level(BOARD_ZG23_RESET_PIN, false);
+                        vTaskDelay(pdMS_TO_TICKS(50));
+                        gpio_set_level(BOARD_ZG23_RESET_PIN, true);
+                    } else {
+                        ESP_LOGW(TAG, "Unknown command: %c%c", rx_buf[0], rx_buf[1]);
+                    }
+                    break;
+                case 'X':
+                case 'x':
+                    // Exit command mode without doing anything
+                    break;
+                default:
+                    ESP_LOGW(TAG, "Unknown command: %c", rx_buf[0]);
+                    break;
+            }
+            s_cmd_mode_enabled = false;
+            ESP_LOGW(TAG, "Exited command mode");
+            return;
+        }
+
         BaseType_t send_res = xRingbufferSend(s_usb_rx_ringbuf, rx_buf, rx_size, 0);
         if (send_res != pdTRUE) {
             ESP_LOGE(TAG, "USB RX to UART RingBuf: Buffer full, %u bytes lost", rx_size);
@@ -226,9 +278,9 @@ static void tinyusb_cdc_line_coding_changed_callback(int itf, cdcacm_event_t *ev
         magic_bootloader_trigger_stage++;
 
         if (magic_bootloader_trigger_stage == sizeof(MAGIC_BOOTLOADER_TRIGGER_BAUDRATES) / sizeof(MAGIC_BOOTLOADER_TRIGGER_BAUDRATES[0])) {
-            ESP_LOGW(TAG, "Launching bootloader reset task");
+            ESP_LOGW(TAG, "Enabling command mode");
             magic_bootloader_trigger_stage = 0;
-            xSemaphoreGive(s_trigger_bootloader);
+            s_cmd_mode_enabled = true;
             return;
         }
     }
@@ -479,7 +531,7 @@ void app_main(void)
 
     // Convert MAC to hex string for serial number
     char serial_str[13];  // 6 bytes * 2 chars per byte + null terminator
-    snprintf(serial_str, sizeof(serial_str), "%02X%02X%02X%02X%02X%02X", 
+    snprintf(serial_str, sizeof(serial_str), "%02X%02X%02X%02X%02X%02X",
              mac[0], mac[1], mac[2], mac[3], mac[4], mac[5]);
 
     const char *string_descriptor[] = {
