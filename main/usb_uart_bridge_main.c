@@ -24,12 +24,13 @@
 
 static const char *TAG = "USB2UART";
 
-// To allow entering the ESP32 bootloader *without* RTS/DTR, set these baudrates on the
-// serial port in this order. Some OSes reset the serial port to a default baudrate so
+// To allow entering the command mode to access the ESP32 bootloader and restart chips
+// *without* RTS/DTR, set these baudrates on the serial port in this order.
+// Some OSes reset the serial port to a default baudrate so
 // as long as these are opened in this order (but not necessarily sequentially), the
-// bootloader will be triggered.
-const uint32_t MAGIC_BOOTLOADER_TRIGGER_BAUDRATES[] = {150, 300, 600};
-const uint64_t MAGIC_BOOTLOADER_TRIGGER_TIMEOUT_MICROS = 5000000;
+// command mode will be triggered.
+const uint32_t MAGIC_CMDMODE_TRIGGER_BAUDRATES[] = {150, 300, 600};
+const uint64_t MAGIC_CMDMODE_TRIGGER_TIMEOUT_MICROS = 5000000;
 
 #define BOARD_UART_PORT        UART_NUM_1
 #define BOARD_UART_TXD_PIN     CONFIG_BOARD_UART_TXD_PIN
@@ -259,27 +260,27 @@ static void tinyusb_cdc_line_coding_changed_callback(int itf, cdcacm_event_t *ev
     uint8_t data_bits = event->line_coding_changed_data.p_line_coding->data_bits;
     ESP_LOGV(TAG, "host require bit_rate=%" PRIu32 " stop_bits=%u parity=%u data_bits=%u", bit_rate, stop_bits, parity, data_bits);
 
-    static uint8_t magic_bootloader_trigger_stage = 0;
-    static uint64_t magic_bootloader_trigger_time = 0;
+    static uint8_t magic_cmdmode_trigger_stage = 0;
+    static uint64_t magic_cmdmode_trigger_time = 0;
 
     uint64_t now = esp_timer_get_time();
 
-    if ((now - magic_bootloader_trigger_time > MAGIC_BOOTLOADER_TRIGGER_TIMEOUT_MICROS) && magic_bootloader_trigger_stage > 0) {
-        ESP_LOGW(TAG, "Magic bootloader baudrate period timed out, resetting state");
-        magic_bootloader_trigger_stage = 0;
+    if ((now - magic_cmdmode_trigger_time > MAGIC_CMDMODE_TRIGGER_TIMEOUT_MICROS) && magic_cmdmode_trigger_stage > 0) {
+        ESP_LOGW(TAG, "Magic command mode baudrate period timed out, resetting state");
+        magic_cmdmode_trigger_stage = 0;
     }
 
-    if (bit_rate == MAGIC_BOOTLOADER_TRIGGER_BAUDRATES[magic_bootloader_trigger_stage]) {
-        if (magic_bootloader_trigger_stage == 0) {
-            magic_bootloader_trigger_time = now;
+    if (bit_rate == MAGIC_CMDMODE_TRIGGER_BAUDRATES[magic_cmdmode_trigger_stage]) {
+        if (magic_cmdmode_trigger_stage == 0) {
+            magic_cmdmode_trigger_time = now;
         }
 
-        ESP_LOGW(TAG, "Received magic bootloader baudrate, stage %d (%" PRIu32 " baud)", magic_bootloader_trigger_stage, bit_rate);
-        magic_bootloader_trigger_stage++;
+        ESP_LOGW(TAG, "Received magic command mode baudrate, stage %d (%" PRIu32 " baud)", magic_cmdmode_trigger_stage, bit_rate);
+        magic_cmdmode_trigger_stage++;
 
-        if (magic_bootloader_trigger_stage == sizeof(MAGIC_BOOTLOADER_TRIGGER_BAUDRATES) / sizeof(MAGIC_BOOTLOADER_TRIGGER_BAUDRATES[0])) {
+        if (magic_cmdmode_trigger_stage == sizeof(MAGIC_CMDMODE_TRIGGER_BAUDRATES) / sizeof(MAGIC_CMDMODE_TRIGGER_BAUDRATES[0])) {
             ESP_LOGW(TAG, "Enabling command mode");
-            magic_bootloader_trigger_stage = 0;
+            magic_cmdmode_trigger_stage = 0;
             s_cmd_mode_enabled = true;
             return;
         }
