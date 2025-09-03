@@ -232,24 +232,6 @@ static void tinyusb_cdc_line_state_changed_callback(int itf, cdcacm_event_t *eve
     int dtr = event->line_state_changed_data.dtr;
     int rts = event->line_state_changed_data.rts;
     ESP_LOGD(TAG, "Line state changed! dtr:%d, rts:%d ", dtr, rts);
-
-    // RTS = ~RESET
-    // DTR = ~BOOT
-
-    // both pins are active low
-    bool reset = true;
-    bool boot = true;
-    // Avoid unwanted combinations
-    if (dtr == 0 && rts == 1) {
-        reset = false;
-        boot = true;
-    } else if (dtr == 1 && rts == 0) {
-        reset = true;
-        boot = false;
-    }
-
-    gpio_set_level(BOARD_ZG23_BTL_PIN, boot);
-    gpio_set_level(BOARD_ZG23_RESET_PIN, reset);
 }
 
 static void tinyusb_cdc_line_coding_changed_callback(int itf, cdcacm_event_t *event)
