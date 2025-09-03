@@ -17,6 +17,10 @@ concurrency:
   group: 'build-firmware-${{ github.ref }}'
   cancel-in-progress: true
 
+# Allow uploading artifacts to releases
+permissions:
+  contents: write
+
 jobs:
   build:
     name: ${{ matrix.device }}
