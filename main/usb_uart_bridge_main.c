@@ -24,12 +24,13 @@
 
 static const char *TAG = "USB2UART";
 
-// To allow entering the ESP32 bootloader *without* RTS/DTR, set these baudrates on the
-// serial port in this order. Some OSes reset the serial port to a default baudrate so
+// To allow entering the command mode to access the ESP32 bootloader and restart chips
+// *without* RTS/DTR, set these baudrates on the serial port in this order.
+// Some OSes reset the serial port to a default baudrate so
 // as long as these are opened in this order (but not necessarily sequentially), the
-// bootloader will be triggered.
-const uint32_t MAGIC_BOOTLOADER_TRIGGER_BAUDRATES[] = {150, 300, 600};
-const uint64_t MAGIC_BOOTLOADER_TRIGGER_TIMEOUT_MICROS = 5000000;
+// command mode will be triggered.
+const uint32_t MAGIC_CMDMODE_TRIGGER_BAUDRATES[] = {150, 300, 600};
+const uint64_t MAGIC_CMDMODE_TRIGGER_TIMEOUT_MICROS = 5000000;
 
 #define BOARD_UART_PORT        UART_NUM_1
 #define BOARD_UART_TXD_PIN     CONFIG_BOARD_UART_TXD_PIN
@@ -63,6 +64,7 @@ static uint32_t s_baud_rate_active = 115200;
 static uint8_t s_stop_bits_active = 0;
 static uint8_t s_parity_active = 0;
 static uint8_t s_data_bits_active = 8;
+static bool s_cmd_mode_enabled = false;
 volatile bool s_reset_to_flash = false;
 volatile bool s_wait_reset = false;
 volatile bool s_in_boot = false;
@@ -165,6 +167,57 @@ static void tinyusb_cdc_rx_callback(int itf, cdcacm_event_t *event)
     ESP_LOG_BUFFER_HEXDUMP(TAG, rx_buf, rx_size, ESP_LOG_VERBOSE);
 
     if (ret == ESP_OK && rx_size > 0) {
+        if (s_cmd_mode_enabled) {
+            switch (rx_buf[0]) {
+                case 'B':
+                case 'b':
+                    if (rx_buf[1] == 'e' || rx_buf[1] == 'E') {
+                        // Trigger bootloader
+                        ESP_LOGW(TAG, "Invoking ESP32-S3 bootloader");
+                        xSemaphoreGive(s_trigger_bootloader);
+                    } else if (rx_buf[1] == 'z' || rx_buf[1] == 'Z') {
+                        // Trigger ZG23 bootloader
+                        ESP_LOGW(TAG, "Invoking ZG23 bootloader");
+                        gpio_set_level(BOARD_ZG23_BTL_PIN, false);
+                        gpio_set_level(BOARD_ZG23_RESET_PIN, false);
+                        vTaskDelay(pdMS_TO_TICKS(50));
+                        gpio_set_level(BOARD_ZG23_BTL_PIN, false);
+                        gpio_set_level(BOARD_ZG23_RESET_PIN, true);
+                        vTaskDelay(pdMS_TO_TICKS(50));
+                        gpio_set_level(BOARD_ZG23_BTL_PIN, true);
+                    } else {
+                        ESP_LOGW(TAG, "Unknown command: %c%c", rx_buf[0], rx_buf[1]);
+                    }
+                    break;
+                case 'R':
+                case 'r':
+                    if (rx_buf[1] == 'e' || rx_buf[1] == 'E') {
+                        // Reboot ESP32-S3
+                        ESP_LOGW(TAG, "Rebooting ESP32-S3");
+                        esp_restart();
+                    } else if (rx_buf[1] == 'z' || rx_buf[1] == 'Z') {
+                        // Reboot ZG23
+                        ESP_LOGW(TAG, "Rebooting ZG23");
+                        gpio_set_level(BOARD_ZG23_RESET_PIN, false);
+                        vTaskDelay(pdMS_TO_TICKS(50));
+                        gpio_set_level(BOARD_ZG23_RESET_PIN, true);
+                    } else {
+                        ESP_LOGW(TAG, "Unknown command: %c%c", rx_buf[0], rx_buf[1]);
+                    }
+                    break;
+                case 'X':
+                case 'x':
+                    // Exit command mode without doing anything
+                    break;
+                default:
+                    ESP_LOGW(TAG, "Unknown command: %c", rx_buf[0]);
+                    break;
+            }
+            s_cmd_mode_enabled = false;
+            ESP_LOGW(TAG, "Exited command mode");
+            return;
+        }
+
         BaseType_t send_res = xRingbufferSend(s_usb_rx_ringbuf, rx_buf, rx_size, 0);
         if (send_res != pdTRUE) {
             ESP_LOGE(TAG, "USB RX to UART RingBuf: Buffer full, %u bytes lost", rx_size);
@@ -207,28 +260,28 @@ static void tinyusb_cdc_line_coding_changed_callback(int itf, cdcacm_event_t *ev
     uint8_t data_bits = event->line_coding_changed_data.p_line_coding->data_bits;
     ESP_LOGV(TAG, "host require bit_rate=%" PRIu32 " stop_bits=%u parity=%u data_bits=%u", bit_rate, stop_bits, parity, data_bits);
 
-    static uint8_t magic_bootloader_trigger_stage = 0;
-    static uint64_t magic_bootloader_trigger_time = 0;
+    static uint8_t magic_cmdmode_trigger_stage = 0;
+    static uint64_t magic_cmdmode_trigger_time = 0;
 
     uint64_t now = esp_timer_get_time();
 
-    if ((now - magic_bootloader_trigger_time > MAGIC_BOOTLOADER_TRIGGER_TIMEOUT_MICROS) && magic_bootloader_trigger_stage > 0) {
-        ESP_LOGW(TAG, "Magic bootloader baudrate period timed out, resetting state");
-        magic_bootloader_trigger_stage = 0;
+    if ((now - magic_cmdmode_trigger_time > MAGIC_CMDMODE_TRIGGER_TIMEOUT_MICROS) && magic_cmdmode_trigger_stage > 0) {
+        ESP_LOGW(TAG, "Magic command mode baudrate period timed out, resetting state");
+        magic_cmdmode_trigger_stage = 0;
     }
 
-    if (bit_rate == MAGIC_BOOTLOADER_TRIGGER_BAUDRATES[magic_bootloader_trigger_stage]) {
-        if (magic_bootloader_trigger_stage == 0) {
-            magic_bootloader_trigger_time = now;
+    if (bit_rate == MAGIC_CMDMODE_TRIGGER_BAUDRATES[magic_cmdmode_trigger_stage]) {
+        if (magic_cmdmode_trigger_stage == 0) {
+            magic_cmdmode_trigger_time = now;
         }
 
-        ESP_LOGW(TAG, "Received magic bootloader baudrate, stage %d (%" PRIu32 " baud)", magic_bootloader_trigger_stage, bit_rate);
-        magic_bootloader_trigger_stage++;
+        ESP_LOGW(TAG, "Received magic command mode baudrate, stage %d (%" PRIu32 " baud)", magic_cmdmode_trigger_stage, bit_rate);
+        magic_cmdmode_trigger_stage++;
 
-        if (magic_bootloader_trigger_stage == sizeof(MAGIC_BOOTLOADER_TRIGGER_BAUDRATES) / sizeof(MAGIC_BOOTLOADER_TRIGGER_BAUDRATES[0])) {
-            ESP_LOGW(TAG, "Launching bootloader reset task");
-            magic_bootloader_trigger_stage = 0;
-            xSemaphoreGive(s_trigger_bootloader);
+        if (magic_cmdmode_trigger_stage == sizeof(MAGIC_CMDMODE_TRIGGER_BAUDRATES) / sizeof(MAGIC_CMDMODE_TRIGGER_BAUDRATES[0])) {
+            ESP_LOGW(TAG, "Enabling command mode");
+            magic_cmdmode_trigger_stage = 0;
+            s_cmd_mode_enabled = true;
             return;
         }
     }
@@ -479,7 +532,7 @@ void app_main(void)
 
     // Convert MAC to hex string for serial number
     char serial_str[13];  // 6 bytes * 2 chars per byte + null terminator
-    snprintf(serial_str, sizeof(serial_str), "%02X%02X%02X%02X%02X%02X", 
+    snprintf(serial_str, sizeof(serial_str), "%02X%02X%02X%02X%02X%02X",
              mac[0], mac[1], mac[2], mac[3], mac[4], mac[5]);
 
     const char *string_descriptor[] = {
