@@ -10,6 +10,7 @@
 #include "freertos/ringbuf.h"
 #include "driver/gpio.h"
 #include "driver/uart.h"
+#include "esp_app_desc.h"
 #include "esp_event.h"
 #include "esp_mac.h"
 #include "esp_log.h"
@@ -170,6 +171,16 @@ static void tinyusb_cdc_rx_callback(int itf, cdcacm_event_t *event)
     if (ret == ESP_OK && rx_size > 0) {
         if (s_cmd_mode_enabled) {
             switch (rx_buf[0]) {
+                case 'I':
+                case 'i':
+                    // Respond with version info
+                    const esp_app_desc_t *app_desc = esp_app_get_description();
+                    char info_buf[64]; // 31 static + 32 max version length + 1 byte null terminator
+                    int len = snprintf(info_buf, sizeof(info_buf), "USB2UART bridge\r\nversion %s\r\n", app_desc->version);
+                    xRingbufferSend(s_usb_tx_ringbuf, info_buf, len, 0);
+                    xTaskNotifyGive(s_usb_tx_handle);
+                    // Do not exit command mode
+                    return;
                 case 'B':
                 case 'b':
                     if (rx_buf[1] == 'e' || rx_buf[1] == 'E') {
