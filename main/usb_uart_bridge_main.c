@@ -71,6 +71,7 @@ volatile bool s_in_boot = false;
 static RingbufHandle_t s_usb_tx_ringbuf = NULL;
 static RingbufHandle_t s_usb_rx_ringbuf = NULL;
 static SemaphoreHandle_t s_trigger_bootloader = NULL;
+static TaskHandle_t s_usb_tx_handle = NULL;
 
 static bool board_zg23_reset_gpio_init(void)
 {
@@ -264,6 +265,12 @@ static void tinyusb_cdc_line_coding_changed_callback(int itf, cdcacm_event_t *ev
             ESP_LOGW(TAG, "Enabling command mode");
             magic_cmdmode_trigger_stage = 0;
             s_cmd_mode_enabled = true;
+
+            // Send 'cmd> ' prompt to host, so it can detect that command mode is active
+            const char *cmd_prompt = "cmd> ";
+            xRingbufferSend(s_usb_tx_ringbuf, cmd_prompt, strlen(cmd_prompt), 0);
+            xTaskNotifyGive(s_usb_tx_handle);
+
             return;
         }
     }
@@ -475,7 +482,7 @@ static void bootloader_reset_task(void *arg) {
 void app_main(void)
 {
     // Only for debugging - do not leave uncommented in production:
-    //esp_log_level_set("*", ESP_LOG_VERBOSE);
+    // esp_log_level_set("*", ESP_LOG_VERBOSE);
 
     uart_config_t uart_config = {
         .baud_rate = CFG_BAUD_RATE(s_baud_rate_active),
@@ -589,6 +596,7 @@ void app_main(void)
     }
 
     xTaskCreate(usb_tx_task, "usb_tx", stack_size, &acm_cfg, 4, &usb_tx_handle);
+    s_usb_tx_handle = usb_tx_handle; // Store in global variable for access in tinyusb callbacks
     xTaskCreate(uart_tx_task, "uart_tx", stack_size, NULL, 4, NULL);
     xTaskCreate(bootloader_reset_task, "bootloader_reset", 2048, NULL, 4, NULL);
 
