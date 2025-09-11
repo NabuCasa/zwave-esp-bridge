@@ -190,12 +190,12 @@ static void tinyusb_cdc_rx_callback(int itf, cdcacm_event_t *event)
                     } else if (rx_buf[1] == 'z' || rx_buf[1] == 'Z') {
                         // Trigger ZG23 bootloader
                         ESP_LOGW(TAG, "Invoking ZG23 bootloader");
-                        gpio_set_level(BOARD_ZG23_BTL_PIN, false);
+                        gpio_set_level(BOARD_ZG23_BTL_PIN, true);
                         gpio_set_level(BOARD_ZG23_RESET_PIN, false);
-                        vTaskDelay(pdMS_TO_TICKS(50));
+                        vTaskDelay(pdMS_TO_TICKS(100));
                         gpio_set_level(BOARD_ZG23_BTL_PIN, false);
                         gpio_set_level(BOARD_ZG23_RESET_PIN, true);
-                        vTaskDelay(pdMS_TO_TICKS(50));
+                        vTaskDelay(pdMS_TO_TICKS(500));
                         gpio_set_level(BOARD_ZG23_BTL_PIN, true);
                     } else {
                         ESP_LOGW(TAG, "Unknown command: %c%c", rx_buf[0], rx_buf[1]);
