@@ -85,13 +85,14 @@ jobs:
       working-directory: build
       run: cp usb2uart.bin ../output/${{ matrix.device }}-esp-bridge.${{ steps.version.outputs.version }}.bin
 
-    - name: Checksums
+    - name: Generate checksums and EWT manifest
       working-directory: output
       run: |
         md5sum ${{ matrix.device }}-esp-bridge.${{ steps.version.outputs.version }}.bin | cut -d ' ' -f 1 > ${{ matrix.device }}-esp-bridge.${{ steps.version.outputs.version }}.bin.md5
         md5sum ${{ matrix.device }}-esp-bridge.${{ steps.version.outputs.version }}.factory.bin | cut -d ' ' -f 1 > ${{ matrix.device }}-esp-bridge.${{ steps.version.outputs.version }}.factory.bin.md5
         sha256sum ${{ matrix.device }}-esp-bridge.${{ steps.version.outputs.version }}.bin | cut -d ' ' -f 1 > ${{ matrix.device }}-esp-bridge.${{ steps.version.outputs.version }}.bin.sha256
         sha256sum ${{ matrix.device }}-esp-bridge.${{ steps.version.outputs.version }}.factory.bin | cut -d ' ' -f 1 > ${{ matrix.device }}-esp-bridge.${{ steps.version.outputs.version }}.factory.bin.sha256
+        python3 build-ewt-manifest.py -v ${{ steps.version.outputs.version }} > manifest.json
 
     - name: Upload artifacts
       uses: actions/upload-artifact@v4
