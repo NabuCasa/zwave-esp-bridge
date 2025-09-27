@@ -93,6 +93,10 @@ jobs:
         sha256sum ${{ matrix.device }}-esp-bridge.${{ steps.version.outputs.version }}.bin | cut -d ' ' -f 1 > ${{ matrix.device }}-esp-bridge.${{ steps.version.outputs.version }}.bin.sha256
         sha256sum ${{ matrix.device }}-esp-bridge.${{ steps.version.outputs.version }}.factory.bin | cut -d ' ' -f 1 > ${{ matrix.device }}-esp-bridge.${{ steps.version.outputs.version }}.factory.bin.sha256
 
+    - name: Generate EWT manifest
+      run: |
+        python3 build_ewt_manifest.py -v ${{ steps.version.outputs.version }} > output/manifest.json
+
     - name: Upload artifacts
       uses: actions/upload-artifact@v4
       with:
