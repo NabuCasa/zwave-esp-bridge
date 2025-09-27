@@ -8,7 +8,6 @@ version = parser.parse_args().v
 manifest = {
   "name": "zwa-2.usb-uart-bridge",
   "version": version,
-  "home_assistant_domain": "esphome",
   "new_install_prompt_erase": "false",
   "builds": [
     {
