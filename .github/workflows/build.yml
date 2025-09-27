@@ -95,7 +95,7 @@ jobs:
 
     - name: Generate EWT manifest
       run: |
-        python3 build-ewt-manifest.py -v ${{ steps.version.outputs.version }} > output/manifest.json
+        python3 build_ewt_manifest.py -v ${{ steps.version.outputs.version }} > output/manifest.json
 
     - name: Upload artifacts
       uses: actions/upload-artifact@v4
