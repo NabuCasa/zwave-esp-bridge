@@ -1,4 +1,5 @@
 import argparse
+import json
 
 parser = argparse.ArgumentParser()
 parser.add_argument('-v', help='Version number to use in the manifest. Example: 2025.09.2', required=True, type=str)
@@ -22,4 +23,4 @@ manifest = {
   ]
 }
 
-print(manifest)
+print(json.dumps(manifest, indent=2))
