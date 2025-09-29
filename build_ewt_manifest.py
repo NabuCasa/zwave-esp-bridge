@@ -9,7 +9,7 @@ version = parser.parse_args().v
 manifest = {
   "name": "zwa-2.usb-uart-bridge",
   "version": version,
-  "new_install_prompt_erase": "false",
+  "new_install_prompt_erase": False,
   "builds": [
     {
       "chipFamily": "ESP32-S3",
