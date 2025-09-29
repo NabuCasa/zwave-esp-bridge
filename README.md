@@ -79,6 +79,13 @@ The example using `ESP32-S3-OTG` board by default, the IO configuration is as fo
 * When using the automatic download feature, connect the development board's `AUTODLD_EN_PIN` and `AUTODLD_BOOT_PIN` pins to the target MCU's IO0 (Boot) and EN (RST) pins respectively.
 * The automatic download feature may not function correctly on certain development boards (due to delays caused by RC circuits). In such cases, please fine-tune the code with gpio_set_level software delays.
 
-### Wireless USB UART Bridge
 
-Please refer to [Wireless USB UART Bridge](https://github.com/espressif/esp-dev-kits/tree/master/esp32-s3-usb-bridge/examples/usb_wireless_bridge).
+## References
+
+ESP USB Bridge (USB to UART & JTAG bridge implementation for ESP-IDF by Espressif):
+* https://github.com/espressif/esp-usb-bridge
+  * https://github.com/espressif/esp-usb-bridge#readme
+    * https://github.com/espressif/esp-dev-kits/blob/master/docs/en/esp32-s3-usb-bridge/user_guide.rst
+
+Wireless USB UART Bridge (ESP32-S3-USB-Bridge) example :
+* https://github.com/espressif/esp-dev-kits/tree/master/examples/esp32-s3-usb-bridge/examples/usb_wireless_bridge
