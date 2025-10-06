@@ -30,7 +30,7 @@ static const char *TAG = "USB2UART";
 // Some OSes reset the serial port to a default baudrate so
 // as long as these are opened in this order (but not necessarily sequentially), the
 // command mode will be triggered.
-const uint32_t MAGIC_CMDMODE_TRIGGER_BAUDRATES[] = {150, 300, 600};
+const uint32_t MAGIC_CMDMODE_TRIGGER_BAUDRATES[] = {150, 300, 1200};
 const uint64_t MAGIC_CMDMODE_TRIGGER_TIMEOUT_MICROS = 5000000;
 
 #define BOARD_UART_PORT        UART_NUM_1
