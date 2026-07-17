@@ -33,6 +33,9 @@ static const char *TAG = "USB2UART";
 const uint32_t MAGIC_CMDMODE_TRIGGER_BAUDRATES[] = {150, 300, 600};
 const uint64_t MAGIC_CMDMODE_TRIGGER_TIMEOUT_MICROS = 5000000;
 
+// Minimum interval between repeated warnings while a host stall persists.
+const int64_t STALL_LOG_INTERVAL_MICROS = 1000000;
+
 #define BOARD_UART_PORT        UART_NUM_1
 #define BOARD_UART_TXD_PIN     CONFIG_BOARD_UART_TXD_PIN
 #define BOARD_UART_RXD_PIN     CONFIG_BOARD_UART_RXD_PIN
@@ -355,6 +358,8 @@ static void usb_tx_task(void *arg)
 
     uint8_t data[USB_TX_BUF_SIZE] = {0};
     size_t tx_data_size = 0;
+    // Back-dated so a stall right after boot still logs immediately
+    int64_t stall_log_time = -STALL_LOG_INTERVAL_MICROS;
 
     while (1) {
         // Wait for a notification from the UART read task
@@ -388,11 +393,50 @@ static void usb_tx_task(void *arg)
             ESP_LOGV(TAG, "usb tx: waiting 10ms for flush");
             esp_err_t flush_ret = tinyusb_cdcacm_write_flush(itf, pdMS_TO_TICKS(10));
 
-            if (flush_ret != ESP_OK) {
-                ESP_LOGE(TAG, "usb tx flush failed");
-                tud_cdc_n_write_clear(itf);
-                break;
+            if (flush_ret == ESP_OK) {
+                continue;
             }
+
+            // Bytes not yet handed to TinyUSB plus bytes still sitting in its transmit
+            // FIFO. (tud_cdc_n_write_occupied() is a private helper inside esp_tinyusb,
+            // so derive the occupancy from the FIFO depth TinyUSB is configured with.)
+            size_t pending = tx_data_size + (CFG_TUD_CDC_TX_BUFSIZE - tud_cdc_n_write_available(itf));
+
+            // A flush timeout only means TinyUSB's transmit FIFO did not fully drain
+            // within the wait window (espressif/esp-idf#10003); the queued bytes are
+            // untouched and TinyUSB keeps sending them from its transfer-complete
+            // callback once the host polls again. Clearing the FIFO here would discard
+            // the tail of a frame whose head is already on the wire, corrupting the
+            // stream mid-frame (#29). Hold the data and retry instead; sustained
+            // backpressure then propagates to the ring buffer, which drops whole reads
+            // with a warning instead of splitting a frame.
+            //
+            // Gate the retry on DTR (tud_cdc_n_connected()) rather than tud_ready(): an
+            // enumerated-but-idle host (no application holding the port open) never
+            // polls the IN endpoint, so retrying on tud_ready() alone would wedge this
+            // task for as long as the board sits plugged into an idle PC. DTR means an
+            // application has the port open and is expected to eventually read.
+            if (flush_ret == ESP_ERR_TIMEOUT && tud_cdc_n_connected(itf)) {
+                int64_t now = esp_timer_get_time();
+                if (now - stall_log_time >= STALL_LOG_INTERVAL_MICROS) {
+                    stall_log_time = now;
+                    ESP_LOGW(TAG, "usb tx: host not reading, %u bytes pending", (unsigned) pending);
+                }
+                continue;
+            }
+
+            if (flush_ret == ESP_ERR_TIMEOUT) {
+                // No application has the port open (DTR deasserted) or the device is
+                // detached, so the data cannot be delivered. TinyUSB does not clear its
+                // transmit FIFO on bus reset; drop the data here so a stale partial
+                // frame is not replayed when the port is (re)opened.
+                ESP_LOGW(TAG, "usb tx: not connected, dropping %u bytes", (unsigned) pending);
+            } else {
+                ESP_LOGE(TAG, "usb tx: flush failed (%s), dropping %u bytes",
+                         esp_err_to_name(flush_ret), (unsigned) pending);
+            }
+            tud_cdc_n_write_clear(itf);
+            break;
         }
     }
 }
@@ -410,6 +454,10 @@ static void uart_rx_task(void *arg)
 
     uint8_t data[UART_RX_BUF_SIZE] = {0};
     uart_event_t event;
+    // Running total of bytes dropped because the USB TX ring buffer was full (never
+    // reset), and the back-dated timestamp of the last warning about it.
+    uint32_t dropped_total = 0;
+    int64_t drop_log_time = -STALL_LOG_INTERVAL_MICROS;
 
     while (1) {
         if (!xQueueReceive(uart_queue, (void *)&event, portMAX_DELAY)) {
@@ -436,7 +484,19 @@ static void uart_rx_task(void *arg)
 
                     int res = xRingbufferSend(s_usb_tx_ringbuf, data, rx_data_size, 0);
                     if (res != pdTRUE) {
-                        ESP_LOGW(TAG, "The unread buffer is too small, the data has been lost");
+                        // While the host stalls, the USB TX task holds pending data and
+                        // the ring buffer stays full (that is the intended
+                        // backpressure), so this runs for every read; throttle the
+                        // warning. The counter is a running total so bytes dropped in
+                        // the tail of one stall are still reported by the next line,
+                        // and the very first drop since boot always logs.
+                        bool first_drop = dropped_total == 0;
+                        dropped_total += rx_data_size;
+                        int64_t now = esp_timer_get_time();
+                        if (first_drop || now - drop_log_time >= STALL_LOG_INTERVAL_MICROS) {
+                            drop_log_time = now;
+                            ESP_LOGW(TAG, "usb tx ring buffer full, %" PRIu32 " bytes dropped total", dropped_total);
+                        }
                     }
                 }
 
